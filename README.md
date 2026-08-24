@@ -74,6 +74,8 @@ existing `~/.config/gdrive/` accounts into that directory.
 gdrive auth login --account foo --login-hint foo@example.com
 
 gdrive auth list
+gdrive whoami
+gdrive --account foo whoami --json
 gdrive --account foo auth status
 gdrive --account foo --non-interactive auth status
 gdrive --account bar drive search "quarterly report"

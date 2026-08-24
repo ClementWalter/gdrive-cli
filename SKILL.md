@@ -58,6 +58,10 @@ gdrive auth login --account foo --login-hint foo@example.com
 # List all authenticated accounts
 gdrive auth list
 
+# Google identity for the current (or --account) token
+gdrive whoami
+gdrive --account foo whoami --json
+
 # Check auth status (default or specific account)
 gdrive auth status
 gdrive --account foo auth status

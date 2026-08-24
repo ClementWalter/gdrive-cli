@@ -55,3 +55,40 @@ def test_does_not_overwrite_existing_accounts(tmp_path, monkeypatch):
 
     assert (dest / "token.json").read_text() == '{"token": "keep"}'
     assert not (new / "accounts" / "foo").exists()
+
+
+class _FakeAbout:
+    def get(self, fields=None):
+        return self
+
+    def execute(self):
+        return {
+            "user": {
+                "displayName": "Foo Bar",
+                "emailAddress": "foo@example.com",
+                "permissionId": "123",
+                "photoLink": "https://example.com/foo.png",
+            }
+        }
+
+
+class _FakeService:
+    def about(self):
+        return _FakeAbout()
+
+
+def test_whoami_maps_drive_about(monkeypatch):
+    monkeypatch.setattr(g, "_drive_service", lambda account: _FakeService())
+    monkeypatch.setattr(g, "_get_default_account", lambda: "foo")
+    info = g._whoami("foo")
+    assert info == {
+        "account": "foo",
+        "default": True,
+        "email": "foo@example.com",
+        "displayName": "Foo Bar",
+        "permissionId": "123",
+        "photoLink": "https://example.com/foo.png",
+    }
+    info = g._whoami("bar")
+    assert info["account"] == "bar"
+    assert info["default"] is False

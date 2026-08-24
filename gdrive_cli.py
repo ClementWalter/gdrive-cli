@@ -340,6 +340,25 @@ def _drive_service(account: str):
     return build("drive", "v3", credentials=_get_credentials(account))
 
 
+def _whoami(account: str) -> dict:
+    """Return the local account name plus the Google identity for that token."""
+    service = _drive_service(account)
+    about = (
+        service.about()
+        .get(fields="user(displayName,emailAddress,permissionId,photoLink)")
+        .execute()
+    )
+    user = about.get("user") or {}
+    return {
+        "account": account,
+        "default": account == _get_default_account(),
+        "email": user.get("emailAddress"),
+        "displayName": user.get("displayName"),
+        "permissionId": user.get("permissionId"),
+        "photoLink": user.get("photoLink"),
+    }
+
+
 def _sheets_service(account: str):
     """Build an authenticated Google Sheets API v4 client."""
     return build("sheets", "v4", credentials=_get_credentials(account))
@@ -594,6 +613,27 @@ def cli(ctx, debug: bool, account: str | None, non_interactive: bool | None) -> 
     ctx.ensure_object(dict)
     ctx.obj["account"] = account or _get_default_account()
     ctx.obj["non_interactive"] = _NON_INTERACTIVE
+
+
+@cli.command("whoami")
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON")
+@click.pass_context
+def whoami(ctx, as_json: bool) -> None:
+    """Print the Google identity for the current (or --account) token.
+
+    Examples:
+        gdrive whoami
+        gdrive --account foo whoami --json
+    """
+    info = _whoami(ctx.obj["account"])
+    if as_json:
+        click.echo(json.dumps(info, indent=2))
+        return
+    flag = " (default)" if info["default"] else ""
+    email = info.get("email") or "?"
+    name = info.get("displayName") or ""
+    extra = f"  {name}" if name else ""
+    console.print(f"{info['account']}{flag}  {email}{extra}")
 
 
 # -- Auth subgroup ----------------------------------------------------------
