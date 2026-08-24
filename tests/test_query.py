@@ -37,22 +37,22 @@ def test_build_search_query_name():
 
 def test_build_search_query_raw_owns_trashed():
     q = g._build_search_query(
-        None, "fullText contains 'Vault' and trashed = false", None, None, None, False
+        None, "fullText contains 'foo' and trashed = false", None, None, None, False
     )
-    assert q == "(fullText contains 'Vault' and trashed = false)"
+    assert q == "(fullText contains 'foo' and trashed = false)"
 
 
 def test_build_search_query_fulltext_flags():
     q = g._build_search_query(
         None,
         None,
-        "Vault",
-        "2026-08-22T07:10:19Z",
+        "foo",
+        "2026-01-01T00:00:00Z",
         "application/vnd.google-apps.document",
         False,
     )
     assert q == (
-        "fullText contains 'Vault' and modifiedTime > '2026-08-22T07:10:19Z' "
+        "fullText contains 'foo' and modifiedTime > '2026-01-01T00:00:00Z' "
         "and mimeType = 'application/vnd.google-apps.document' and trashed = false"
     )
 

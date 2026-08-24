@@ -60,11 +60,14 @@ MIME_ALIASES = {
     "folder": "application/vnd.google-apps.folder",
 }
 
-# Skill directory is the canonical location for client_secret / service_account
+# Repo root (PEP 723 script). Do not store secrets here — it is a git checkout.
 SKILL_DIR = Path(__file__).resolve().parent
 # Per-user config: tokens, account list, default account
-CONFIG_DIR = Path.home() / ".config" / "gdrive"
-LEGACY_CONFIG_DIR = Path.home() / ".config" / "gdrive-sheets-compute"
+CONFIG_DIR = Path.home() / ".config" / "gdrive-cli"
+LEGACY_CONFIG_DIRS = (
+    Path.home() / ".config" / "gdrive",
+    Path.home() / ".config" / "gdrive-sheets-compute",
+)
 
 # Export formats for Google Docs
 DOC_EXPORT_FORMATS = {
@@ -149,30 +152,68 @@ def _list_accounts() -> list[str]:
     )
 
 
+def _has_account_tokens(root: Path) -> bool:
+    """True if root/accounts/<name>/token.json exists for any name."""
+    accounts = root / "accounts"
+    if not accounts.is_dir():
+        return False
+    return any(
+        d.is_dir() and (d / "token.json").exists()
+        for d in accounts.iterdir()
+    )
+
+
+def _copy_if_absent(src: Path, dst: Path) -> None:
+    if not src.exists() or dst.exists():
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst, follow_symlinks=True)
+
+
 def _maybe_migrate_legacy_config() -> None:
-    """One-time migration from gdrive-sheets-compute config to gdrive config.
+    """Copy tokens from older config dirs into ~/.config/gdrive-cli.
 
-    Moves the existing single-account token into accounts/default/token.json.
-    Only runs if the legacy dir exists and the new dir does not yet have accounts.
+    Sources, in order:
+    1. ~/.config/gdrive/ (multi-account layout)
+    2. ~/.config/gdrive-sheets-compute/ (single token.json)
+
+    No-op once gdrive-cli already has at least one account token.
     """
-    if not LEGACY_CONFIG_DIR.exists():
-        return
-    accounts_dir = CONFIG_DIR / "accounts"
-    if accounts_dir.exists():
-        # Already migrated — don't overwrite
+    if _has_account_tokens(CONFIG_DIR):
         return
 
-    logger.info("Migrating config from %s to %s", LEGACY_CONFIG_DIR, CONFIG_DIR)
-    default_dir = accounts_dir / "default"
-    default_dir.mkdir(parents=True)
+    for legacy in LEGACY_CONFIG_DIRS:
+        if _has_account_tokens(legacy):
+            logger.info("Migrating config from %s to %s", legacy, CONFIG_DIR)
+            shutil.copytree(
+                legacy / "accounts",
+                CONFIG_DIR / "accounts",
+                dirs_exist_ok=True,
+            )
+            _copy_if_absent(legacy / "config.json", CONFIG_DIR / "config.json")
+            for src in legacy.glob("client_secret*.json"):
+                _copy_if_absent(src, CONFIG_DIR / src.name)
+            _copy_if_absent(
+                legacy / "service_account.json",
+                CONFIG_DIR / "service_account.json",
+            )
+            console.print(
+                f"[green]Migrated credentials from {legacy} to {CONFIG_DIR}[/green]"
+            )
+            return
 
-    legacy_token = LEGACY_CONFIG_DIR / "token.json"
-    if legacy_token.exists():
-        shutil.copy2(legacy_token, default_dir / "token.json")
-
-    # Write initial config pointing to the migrated account
-    _save_config({"default_account": "default"})
-    console.print("[green]Migrated credentials from gdrive-sheets-compute to gdrive (account: default)[/green]")
+        legacy_token = legacy / "token.json"
+        if legacy_token.exists():
+            logger.info("Migrating config from %s to %s", legacy, CONFIG_DIR)
+            dest = CONFIG_DIR / "accounts" / "default"
+            dest.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(legacy_token, dest / "token.json")
+            if not (CONFIG_DIR / "config.json").exists():
+                _save_config({"default_account": "default"})
+            console.print(
+                f"[green]Migrated credentials from {legacy} to {CONFIG_DIR}[/green]"
+            )
+            return
 
 
 # ---------------------------------------------------------------------------
@@ -198,9 +239,9 @@ def _find_client_secret(account: str) -> Path | None:
     precedence over the shared client_secret.json.
 
     Resolution order:
-    1. ~/.config/gdrive/accounts/{account}/client_secret.json (per-account)
-    2. client_secret_{account}.json in skill dir or config dir
-    3. shared client_secret.json in skill dir or config dir
+    1. ~/.config/gdrive-cli/accounts/{account}/client_secret.json (per-account)
+    2. client_secret_{account}.json in the config dir (or the repo, last resort)
+    3. shared client_secret.json in the config dir (or the repo, last resort)
     """
     per_account = CONFIG_DIR / "accounts" / account / "client_secret.json"
     if per_account.exists():
@@ -215,7 +256,7 @@ def _get_credentials(account: str, login_hint: str | None = None) -> Credentials
     """Load credentials for a named account.
 
     Resolution order:
-    1. Cached OAuth2 token at ~/.config/gdrive/accounts/{account}/token.json
+    1. Cached OAuth2 token at ~/.config/gdrive-cli/accounts/{account}/token.json
     2. Interactive OAuth2 flow via client_secret.json (opens browser)
     3. Service account fallback (GOOGLE_APPLICATION_CREDENTIALS env or local file)
 
@@ -280,9 +321,10 @@ def _get_credentials(account: str, login_hint: str | None = None) -> Credentials
 
     raise click.ClickException(
         f"No credentials found for account '{account}'.\n"
-        f"  For full Drive access: place client_secret_{account}.json (or a shared client_secret.json) "
-        f"in {SKILL_DIR} and run 'auth login --account {account}'\n"
-        f"  For shared files only: place service_account.json in {SKILL_DIR}"
+        f"  For full Drive access: place client_secret.json in {CONFIG_DIR} "
+        f"or {CONFIG_DIR}/accounts/{account}/client_secret.json and run "
+        f"'gdrive auth login --account {account}'\n"
+        f"  For shared files only: place service_account.json in {CONFIG_DIR}"
     )
 
 
@@ -367,7 +409,7 @@ def _build_search_query(
             "Provide a name, --q, or --full-text.\n"
             "  gdrive drive search budget\n"
             "  gdrive drive search "
-            "--q \"fullText contains 'Vault' and trashed = false\" --json --limit 0"
+            "--q \"fullText contains 'foo' and trashed = false\" --json --limit 0"
         )
     if not include_trashed and not (raw_q and "trashed" in raw_q):
         parts.append("trashed = false")
@@ -810,8 +852,8 @@ def drive_search(
     Examples:
         drive search budget
         drive search "tax 2024" --type spreadsheet
-        drive search --full-text Vault --type doc --modified-after 2026-08-22T07:10:19Z --json --limit 0
-        drive search --q "(name contains 'Notes by Gemini' or name contains 'Notes from') and modifiedTime > '2026-08-22T07:10:19Z' and trashed = false" --json --limit 0
+        drive search --full-text foo --type doc --modified-after 2026-01-01T00:00:00Z --json --limit 0
+        drive search --q "(name contains 'foo' or name contains 'bar') and modifiedTime > '2026-01-01T00:00:00Z' and trashed = false" --json --limit 0
     """
     resolved_mime = mime_type
     if not resolved_mime and file_type and file_type != "any":
@@ -975,7 +1017,7 @@ def drive_rename(ctx, file_id: str, new_title: str, as_json: bool) -> None:
     unchanged. Requires write access to the file.
 
     Examples:
-        drive rename 1AbC... "Vault APY sync - 2026/07/08 - Notes by Gemini"
+        drive rename 1AbC... "foo bar notes"
     """
     account = ctx.obj["account"]
     service = _drive_service(account)

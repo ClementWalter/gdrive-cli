@@ -65,18 +65,18 @@ ln -sfn /path/to/gdrive-cli/bin/gdrive ~/.local/bin/gdrive
 
 ## Authentication
 
-OAuth2 desktop flow. Per-account tokens live under `~/.config/gdrive/`
-(that directory name is historical — do not rename it; existing tokens are
-there). The `zama` account is the work Google account; `default` is a
-personal Budget project and cannot see work files.
+OAuth2 desktop flow. Per-account tokens live under `~/.config/gdrive-cli/`
+(same shape as `notion-cli` / `slack-user-cli`). The first run copies any
+existing `~/.config/gdrive/` accounts into that directory.
 
 ```bash
 # First-time setup: opens browser for Google OAuth consent
-gdrive auth login --account zama --login-hint you@company.com
+gdrive auth login --account foo --login-hint foo@example.com
 
 gdrive auth list
-gdrive --account zama auth status
-gdrive --account zama --non-interactive auth status
+gdrive --account foo auth status
+gdrive --account foo --non-interactive auth status
+gdrive --account bar drive search "quarterly report"
 ```
 
 Non-interactive sessions (no TTY, or `--non-interactive`) never open a
@@ -87,16 +87,16 @@ real terminal.
 
 ```bash
 # Name search. Shared drives included by default.
-gdrive drive search budget
-gdrive drive search "tax 2024" --type spreadsheet --json
+gdrive --account foo drive search budget
+gdrive --account foo drive search "tax 2024" --type spreadsheet --json
 
 # Raw Drive v3 q= / fullText / modifiedTime
-gdrive drive search --q "(name contains 'Notes by Gemini' or name contains 'Notes from') and modifiedTime > '2026-08-22T07:10:19Z' and trashed = false" --json --limit 0
-gdrive drive search --full-text Vault --type doc --modified-after 2026-08-22T07:10:19Z --json --limit 0
+gdrive --account foo drive search --q "(name contains 'foo' or name contains 'bar') and modifiedTime > '2026-01-01T00:00:00Z' and trashed = false" --json --limit 0
+gdrive --account foo drive search --full-text foo --type doc --modified-after 2026-01-01T00:00:00Z --json --limit 0
 
 # Read / metadata / comments / rename
-gdrive docs read --url "https://docs.google.com/document/d/ID/edit" --format markdown
-gdrive drive get ID --json --permissions
-gdrive drive comments ID --json
-gdrive drive rename ID "New title" --json
+gdrive --account foo docs read --url "https://docs.google.com/document/d/ID/edit" --format markdown
+gdrive --account foo drive get ID --json --permissions
+gdrive --account foo drive comments ID --json
+gdrive --account foo drive rename ID "New title" --json
 ```

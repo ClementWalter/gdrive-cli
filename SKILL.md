@@ -33,7 +33,7 @@ repo's `bin/gdrive`, so it always runs the current checkout: a `git pull`, or
 even an uncommitted edit, takes effect immediately with nothing to reinstall.
 
 ```bash
-gdrive --account zama --non-interactive auth status
+gdrive --account foo --non-interactive auth status
 ```
 
 Examples in this doc are written that way. If `gdrive` is not on `$PATH`, run
@@ -53,37 +53,37 @@ Uses OAuth2 with a desktop app flow. Supports multiple Google accounts.
 gdrive auth login
 
 # Login with a named account (pre-selects Google account in browser)
-gdrive auth login --account work --login-hint user@company.com
+gdrive auth login --account foo --login-hint foo@example.com
 
 # List all authenticated accounts
 gdrive auth list
 
 # Check auth status (default or specific account)
 gdrive auth status
-gdrive --account work auth status
+gdrive --account foo auth status
 
 # Set default account
-gdrive auth set-default work
+gdrive auth set-default foo
 
 # Remove credentials for an account
-gdrive --account work auth logout
+gdrive --account foo auth logout
 ```
 
-Credentials stored in `~/.config/gdrive/accounts/<name>/token.json`. That
-config-dir name is historical — do not rename it.
+Credentials live in `~/.config/gdrive-cli/accounts/<name>/token.json`. The
+first run copies any existing `~/.config/gdrive/` accounts into that directory.
 
 ### Multi-Account Usage
 
 The `--account` flag goes on the top-level command (before the subcommand):
 
 ```bash
-gdrive --account work docs read --url "https://..."
-gdrive --account work drive search "budget"
-gdrive --account personal sheets read --spreadsheet-id ID --range 'A1:D10'
+gdrive --account foo docs read --url "https://..."
+gdrive --account foo drive search "budget"
+gdrive --account bar sheets read --spreadsheet-id ID --range 'A1:D10'
 ```
 
-Use the `zama` account for work Drive files. The `default` account is a
-personal Budget project and cannot see work files.
+Use a named account per Google identity. Tokens are not interchangeable
+across Cloud projects or consent screens.
 
 ### Required OAuth Scopes
 
@@ -98,13 +98,13 @@ personal Budget project and cannot see work files.
 4. Create **OAuth 2.0 Client ID** (Desktop application)
 5. Download the JSON and save it under the per-user config dir — **never inside
    the skill directory, which is a git repo**:
-   - default account: `~/.config/gdrive/accounts/default/client_secret.json`
+   - default account: `~/.config/gdrive-cli/accounts/default/client_secret.json`
    - named account `<name>`:
-     `~/.config/gdrive/accounts/<name>/client_secret.json`
+     `~/.config/gdrive-cli/accounts/<name>/client_secret.json`
 
-   The resolver also accepts `~/.config/gdrive/client_secret.json` (shared) or
-   `~/.config/gdrive/client_secret_<name>.json`. Keeping secrets in
-   `~/.config/gdrive/` guarantees they can never be committed.
+   The resolver also accepts `~/.config/gdrive-cli/client_secret.json` (shared)
+   or `~/.config/gdrive-cli/client_secret_<name>.json`. Keeping secrets in
+   `~/.config/gdrive-cli/` guarantees they can never be committed.
 
 ## Commands
 
@@ -128,12 +128,12 @@ gdrive drive search budget
 gdrive drive search "tax 2024" --type spreadsheet
 gdrive drive search invoices --type pdf
 
-# Raw Drive v3 q= (coverage-equivalent of connector _search / search_files)
-gdrive drive search --q "(name contains 'Notes by Gemini' or name contains 'Notes from') and modifiedTime > '2026-08-22T07:10:19Z' and trashed = false" --json --limit 0
+# Raw Drive v3 q=
+gdrive drive search --q "(name contains 'foo' or name contains 'bar') and modifiedTime > '2026-01-01T00:00:00Z' and trashed = false" --json --limit 0
 
 # fullText + modifiedTime + type flags
-gdrive drive search --full-text Vault --type doc --modified-after 2026-08-22T07:10:19Z --json --limit 0
-gdrive drive search --full-text wrapper --type doc --modified-after 2026-08-22T07:10:19Z --json --limit 0
+gdrive drive search --full-text foo --type doc --modified-after 2026-01-01T00:00:00Z --json --limit 0
+gdrive drive search --full-text bar --type doc --modified-after 2026-01-01T00:00:00Z --json --limit 0
 
 # Metadata / ACL / comments (ID or URL)
 gdrive drive get 1AbC... --json
@@ -198,11 +198,12 @@ gdrive pipeline folder-summary --folder-id <FOLDER_ID>
 ## Key Details
 
 - **Auth**: OAuth2 desktop flow with per-account refresh token persistence
-- **Config dir**: `~/.config/gdrive/`
-- **Multi-account**: Each account stored in `~/.config/gdrive/accounts/<name>/`
-- **Migration**: Auto-migrates from `~/.config/gdrive-sheets-compute/` on first
-  run
-- **PDF extraction**: Uses `pymupdf` (fitz) for text extraction
+- **Config dir**: `~/.config/gdrive-cli/`
+- **Multi-account**: Each account stored in `~/.config/gdrive-cli/accounts/<name>/`
+- **Migration**: Auto-copies `~/.config/gdrive/` (and the older
+  `~/.config/gdrive-sheets-compute/` single-token layout) on first run if the
+  new dir has no accounts yet
+- **PDF extraction**: Uses `pymupdf` for text extraction
 - **Sheets formulas**: Use `write-formula` for single formulas, or include
   formula strings in `write`/`batch-write` values (prefix with `=`)
 - **Rate limits**: Google API quotas apply; batch operations preferred over many
@@ -210,21 +211,22 @@ gdrive pipeline folder-summary --folder-id <FOLDER_ID>
 
 ## Programmatic Access via gspread (Python)
 
-This is **not** a Drive file gateway. It is a personal-sheets compute pipeline
-(service-account `gspread`) for creating/populating spreadsheets. Work Drive
-files, Gemini notes, and vault-update collection stay on the CLI above.
+This is **not** a Drive file gateway. It is a sheets compute pipeline
+(service-account `gspread`) for creating/populating spreadsheets. Drive file
+search, reads, and renames stay on the CLI above.
 
 When writing Python scripts that create/populate Google Sheets (e.g. with
-`uv run`), use the `gspread` library with the existing service account:
+`uv run`), use the `gspread` library with a service account key:
 
 ### Auth
 
 ```python
 import gspread
+from pathlib import Path
 
 # Service account key — never inside this repo
 gc = gspread.service_account(
-    filename=Path.home() / ".config/gdrive/service_account.json"
+    filename=Path.home() / ".config/gdrive-cli/service_account.json"
 )
 ```
 
