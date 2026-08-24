@@ -163,9 +163,9 @@ gdrive drive extract-pdfs --folder-id <FOLDER_ID>
 
 `--json` on `search` / `ls` emits `{q, n, files}` and is empty-safe (`n: 0`).
 `--limit 0` pages until empty. `--modified-after` accepts a date, a
-`YYYY-MM-DD HH:MM:SS`, or a full `…Z` ISO timestamp. Non-interactive sessions
-(no TTY, or `--non-interactive`) never open a browser; a lapsed token fails with
-the `auth login --account <name>` command to run in a real terminal.
+`YYYY-MM-DD HH:MM:SS`, or a full `…Z` ISO timestamp. Only `gdrive auth login`
+opens a browser. A lapsed token on any other command fails with the
+`auth login --account <name>` command to run in a real terminal.
 
 ### Sheets Operations
 

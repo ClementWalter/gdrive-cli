@@ -81,9 +81,8 @@ gdrive --account foo --non-interactive auth status
 gdrive --account bar drive search "quarterly report"
 ```
 
-Non-interactive sessions (no TTY, or `--non-interactive`) never open a
-browser. A lapsed token fails with the `auth login` command to run in a
-real terminal.
+Only `gdrive auth login` opens a browser. A lapsed token on any other
+command fails with the `auth login` invocation to run in a real terminal.
 
 ## Usage
 

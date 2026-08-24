@@ -92,3 +92,24 @@ def test_whoami_maps_drive_about(monkeypatch):
     info = g._whoami("bar")
     assert info["account"] == "bar"
     assert info["default"] is False
+
+
+def test_friendly_http_error_access_not_configured(monkeypatch):
+    class _Resp:
+        status = 403
+        reason = "Forbidden"
+
+    payload = json.dumps(
+        {
+            "error": {
+                "message": "Google Drive API has not been used in project 123 before or it is disabled.",
+                "errors": [{"reason": "accessNotConfigured"}],
+            }
+        }
+    ).encode()
+    exc = g.HttpError(_Resp(), payload)
+    monkeypatch.setattr(g, "_list_accounts", lambda: ["default", "foo"])
+    monkeypatch.setattr(g, "_get_default_account", lambda: "default")
+    msg = g._friendly_http_error(exc, "default")
+    assert "account 'default'" in msg
+    assert "gdrive --account foo whoami" in msg

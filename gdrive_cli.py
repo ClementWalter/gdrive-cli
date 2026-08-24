@@ -32,6 +32,7 @@ from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account as sa_module
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 from rich.console import Console
 from rich.table import Table
@@ -252,12 +253,18 @@ def _find_client_secret(account: str) -> Path | None:
     return _find_file("client_secret.json")
 
 
-def _get_credentials(account: str, login_hint: str | None = None) -> Credentials:
+def _get_credentials(
+    account: str,
+    login_hint: str | None = None,
+    *,
+    interactive: bool = False,
+) -> Credentials:
     """Load credentials for a named account.
 
     Resolution order:
     1. Cached OAuth2 token at ~/.config/gdrive-cli/accounts/{account}/token.json
-    2. Interactive OAuth2 flow via client_secret.json (opens browser)
+    2. Interactive OAuth2 flow via client_secret.json (opens browser) — only
+       when ``interactive=True`` (``gdrive auth login``)
     3. Service account fallback (GOOGLE_APPLICATION_CREDENTIALS env or local file)
 
     The login_hint parameter pre-selects the Google account in the browser
@@ -277,34 +284,24 @@ def _get_credentials(account: str, login_hint: str | None = None) -> Credentials
             _save_token(creds, account)
             return creds
         except Exception:
-            # Refresh token revoked or expired beyond recovery — fall through
-            # to interactive flow below
-            logger.warning("Token refresh failed for account '%s', re-authenticating", account)
+            logger.warning("Token refresh failed for account '%s'", account)
             creds = None
     elif creds and creds.valid:
         return creds
 
-    if _NON_INTERACTIVE:
-        raise click.ClickException(
-            f"Account '{account}' is not authenticated (non-interactive).\n"
-            f"  Run in a real terminal:\n"
-            f"  gdrive auth login --account {account}"
-        )
-
-    # No valid OAuth2 token — try interactive flow if a client_secret exists.
-    # Resolved per-account so each account can use its own OAuth client/project.
-    client_secret = _find_client_secret(account)
-    if client_secret:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            str(client_secret), SCOPES
-        )
-        # login_hint pre-selects the right Google account in the browser
-        kwargs = {}
-        if login_hint:
-            kwargs["login_hint"] = login_hint
-        creds = flow.run_local_server(port=0, **kwargs)
-        _save_token(creds, account)
-        return creds
+    if interactive and not _NON_INTERACTIVE:
+        # Only `gdrive auth login` opens a browser. Other commands fail-loud.
+        client_secret = _find_client_secret(account)
+        if client_secret:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(client_secret), SCOPES
+            )
+            kwargs = {}
+            if login_hint:
+                kwargs["login_hint"] = login_hint
+            creds = flow.run_local_server(port=0, **kwargs)
+            _save_token(creds, account)
+            return creds
 
     # Fall back to service account (limited to explicitly shared files)
     env_sa = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
@@ -320,11 +317,9 @@ def _get_credentials(account: str, login_hint: str | None = None) -> Credentials
         )
 
     raise click.ClickException(
-        f"No credentials found for account '{account}'.\n"
-        f"  For full Drive access: place client_secret.json in {CONFIG_DIR} "
-        f"or {CONFIG_DIR}/accounts/{account}/client_secret.json and run "
-        f"'gdrive auth login --account {account}'\n"
-        f"  For shared files only: place service_account.json in {CONFIG_DIR}"
+        f"Account '{account}' is not authenticated.\n"
+        f"  Run in a real terminal:\n"
+        f"  gdrive auth login --account {account}"
     )
 
 
@@ -340,14 +335,46 @@ def _drive_service(account: str):
     return build("drive", "v3", credentials=_get_credentials(account))
 
 
+def _friendly_http_error(exc: HttpError, account: str | None = None) -> str:
+    """Turn a Drive/Sheets HttpError into a one-screen CLI message."""
+    message = getattr(exc, "reason", None) or str(exc)
+    try:
+        payload = json.loads(exc.content.decode("utf-8")) if exc.content else {}
+        err = (payload.get("error") or {})
+        details = err.get("details") or err.get("errors") or []
+        reasons = [d.get("reason") for d in details if isinstance(d, dict)]
+        message = err.get("message") or message
+    except Exception:
+        reasons = []
+    account = account or _get_default_account()
+    others = [a for a in _list_accounts() if a != account]
+    if "accessNotConfigured" in reasons or "has not been used" in str(message):
+        extra = ""
+        if others:
+            extra = (
+                f"\n  This CLI is using account '{account}'. Other accounts:\n"
+                + "\n".join(f"    gdrive --account {a} whoami" for a in others)
+            )
+        return (
+            f"Google Drive API is not enabled for the OAuth project behind "
+            f"account '{account}'.\n"
+            f"  {message}\n"
+            f"{extra}"
+        )
+    return f"Drive API error: {message}"
+
+
 def _whoami(account: str) -> dict:
     """Return the local account name plus the Google identity for that token."""
     service = _drive_service(account)
-    about = (
-        service.about()
-        .get(fields="user(displayName,emailAddress,permissionId,photoLink)")
-        .execute()
-    )
+    try:
+        about = (
+            service.about()
+            .get(fields="user(displayName,emailAddress,permissionId,photoLink)")
+            .execute()
+        )
+    except HttpError as exc:
+        raise click.ClickException(_friendly_http_error(exc, account)) from exc
     user = about.get("user") or {}
     return {
         "account": account,
@@ -656,7 +683,7 @@ def auth_login(ctx, account_name: str | None, login_hint: str | None) -> None:
     """
     # Use the account from auth login --account, or the global --account, or "default"
     account = account_name or ctx.obj["account"]
-    creds = _get_credentials(account, login_hint=login_hint)
+    creds = _get_credentials(account, login_hint=login_hint, interactive=True)
     if creds and creds.valid:
         console.print(f"[green]Authenticated successfully (account: {account}).[/green]")
     else:
@@ -1412,4 +1439,8 @@ def pipeline_folder_summary(ctx, folder_id: str) -> None:
 
 
 if __name__ == "__main__":
-    cli()
+    try:
+        cli()
+    except HttpError as exc:
+        click.echo(f"Error: {_friendly_http_error(exc)}", err=True)
+        raise SystemExit(1) from exc
