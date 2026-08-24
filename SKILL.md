@@ -49,7 +49,8 @@ ln -sfn <skill-dir>/bin/gdrive ~/.local/bin/gdrive
 Uses OAuth2 with a desktop app flow. Supports multiple Google accounts.
 
 ```bash
-# First-time setup: opens browser for Google OAuth consent
+# First-time setup: opens browser for Google OAuth consent.
+# Bare login always writes the `default` slot (not auth set-default).
 gdrive auth login
 
 # Login with a named account (pre-selects Google account in browser)

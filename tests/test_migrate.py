@@ -113,3 +113,10 @@ def test_friendly_http_error_access_not_configured(monkeypatch):
     msg = g._friendly_http_error(exc, "default")
     assert "account 'default'" in msg
     assert "gdrive --account foo whoami" in msg
+
+
+def test_login_account_ignores_set_default():
+    assert g._login_account(None, None) == "default"
+    assert g._login_account("foo", None) == "foo"
+    assert g._login_account(None, "bar") == "bar"
+    assert g._login_account("foo", "bar") == "foo"

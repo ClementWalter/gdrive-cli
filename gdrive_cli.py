@@ -258,6 +258,7 @@ def _get_credentials(
     login_hint: str | None = None,
     *,
     interactive: bool = False,
+    force: bool = False,
 ) -> Credentials:
     """Load credentials for a named account.
 
@@ -273,8 +274,8 @@ def _get_credentials(
     token_file = _token_path(account)
     creds = None
 
-    # Try cached OAuth2 token first — preferred because it gives full Drive access
-    if token_file.exists():
+    # `gdrive auth login` always re-consents. Other commands reuse a valid token.
+    if not force and token_file.exists():
         creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
 
     if creds and creds.expired and creds.refresh_token:
@@ -638,8 +639,19 @@ def cli(ctx, debug: bool, account: str | None, non_interactive: bool | None) -> 
         _NON_INTERACTIVE = non_interactive
 
     ctx.ensure_object(dict)
+    ctx.obj["account_flag"] = account
     ctx.obj["account"] = account or _get_default_account()
     ctx.obj["non_interactive"] = _NON_INTERACTIVE
+
+
+def _login_account(account_name: str | None, account_flag: str | None) -> str:
+    """Account slot for `auth login`.
+
+    Bare `gdrive auth login` always writes the `default` slot. A named
+    account requires `--account` (top-level or on `auth login`).
+    `auth set-default` only affects other commands, not login.
+    """
+    return account_name or account_flag or "default"
 
 
 @cli.command("whoami")
@@ -680,14 +692,26 @@ def auth_login(ctx, account_name: str | None, login_hint: str | None) -> None:
 
     Creates a new named account or refreshes an existing one.
     Use --login-hint to pre-select the right Google account in the browser.
+    Bare `gdrive auth login` always writes the `default` slot.
     """
-    # Use the account from auth login --account, or the global --account, or "default"
-    account = account_name or ctx.obj["account"]
-    creds = _get_credentials(account, login_hint=login_hint, interactive=True)
-    if creds and creds.valid:
-        console.print(f"[green]Authenticated successfully (account: {account}).[/green]")
-    else:
+    account = _login_account(account_name, ctx.obj.get("account_flag"))
+    creds = _get_credentials(
+        account, login_hint=login_hint, interactive=True, force=True
+    )
+    if not (creds and creds.valid):
         console.print("[red]Authentication failed.[/red]")
+        return
+    console.print(f"[green]Authenticated successfully (account: {account}).[/green]")
+    try:
+        info = _whoami(account)
+    except click.ClickException as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        return
+    email = info.get("email") or "?"
+    name = info.get("displayName") or ""
+    extra = f"  {name}" if name else ""
+    flag = " (default)" if info["default"] else ""
+    console.print(f"{info['account']}{flag}  {email}{extra}")
 
 
 @auth.command("status")

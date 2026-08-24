@@ -71,6 +71,7 @@ existing `~/.config/gdrive/` accounts into that directory.
 
 ```bash
 # First-time setup: opens browser for Google OAuth consent
+gdrive auth login
 gdrive auth login --account foo --login-hint foo@example.com
 
 gdrive auth list
@@ -81,8 +82,10 @@ gdrive --account foo --non-interactive auth status
 gdrive --account bar drive search "quarterly report"
 ```
 
-Only `gdrive auth login` opens a browser. A lapsed token on any other
-command fails with the `auth login` invocation to run in a real terminal.
+Bare `gdrive auth login` always writes the `default` slot, even if
+`auth set-default` points at another account. Only `gdrive auth login`
+opens a browser. A lapsed token on any other command fails with the
+`auth login` invocation to run in a real terminal.
 
 ## Usage
 
