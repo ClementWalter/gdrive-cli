@@ -188,7 +188,20 @@ gdrive sheets batch-write --spreadsheet-id <ID> \
 
 # Get spreadsheet metadata (sheet names, grid properties)
 gdrive sheets info --spreadsheet-id <ID>
+
+# Formatting: wrapping, vertical alignment, row heights
+gdrive sheets format --spreadsheet-id <ID> --range 'Sheet1!G2:G50' --wrap --valign TOP
+gdrive sheets format --spreadsheet-id <ID> --range 'Sheet1!A2:G50' --row-height 21
+gdrive sheets format --spreadsheet-id <ID> --range 'Sheet1!A7:G7' --row-height 71
 ```
+
+A `\n` inside a written value only shows up if the cell wraps, so pair
+multi-line writes with `--wrap`. **`--autofit-rows` does not grow rows** —
+Sheets' `autoResizeDimensions` leaves them at the default height and the content
+stays clipped; use an explicit `--row-height` (roughly 21px per line) instead.
+Heights persist, so reset a block to its baseline before growing individual
+rows, or a row that loses content stays tall. `format` prints the resulting
+pixel heights, so the outcome is verified rather than assumed.
 
 ### Pipeline: PDF -> Sheets
 

@@ -1401,6 +1401,153 @@ def sheets_batch_write(ctx, spreadsheet_id: str, data: str, input_option: str) -
     console.print(f"[green]Batch updated {total} cells across {len(parsed_data)} ranges[/green]")
 
 
+def _a1_to_grid_range(service, spreadsheet_id: str, cell_range: str) -> dict:
+    """Turn "\'Tab\'!B2:D10" into the GridRange that batchUpdate requests need.
+
+    The Sheets API exposes no A1 resolver, so the tab title is looked up against
+    the spreadsheet's own metadata rather than assumed to be the first sheet.
+    """
+    tab, _, span = cell_range.rpartition("!")
+    tab = tab.strip().strip("'")
+    meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    sheets_meta = [s["properties"] for s in meta.get("sheets", [])]
+    if tab:
+        match = [s for s in sheets_meta if s["title"] == tab]
+        if not match:
+            raise click.ClickException(
+                f"no sheet named {tab!r}; have {', '.join(s['title'] for s in sheets_meta)}"
+            )
+        props = match[0]
+    else:
+        props = sheets_meta[0]
+
+    def split(ref: str) -> tuple[str, str]:
+        letters = "".join(c for c in ref if c.isalpha())
+        digits = "".join(c for c in ref if c.isdigit())
+        return letters.upper(), digits
+
+    def col_index(letters: str) -> int:
+        index = 0
+        for char in letters:
+            index = index * 26 + (ord(char) - ord("A") + 1)
+        return index - 1
+
+    start_ref, _, end_ref = span.partition(":")
+    end_ref = end_ref or start_ref
+    start_col, start_row = split(start_ref)
+    end_col, end_row = split(end_ref)
+
+    grid = {"sheetId": props["sheetId"]}
+    # An omitted bound means "to the edge of the grid", matching A1 semantics
+    # like G23:G — so the key is left out rather than defaulted to zero.
+    if start_row:
+        grid["startRowIndex"] = int(start_row) - 1
+    if end_row:
+        grid["endRowIndex"] = int(end_row)
+    if start_col:
+        grid["startColumnIndex"] = col_index(start_col)
+    if end_col:
+        grid["endColumnIndex"] = col_index(end_col) + 1
+    return grid
+
+
+@sheets.command("format")
+@click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
+@click.option("--range", "cell_range", required=True, help="A1 range notation")
+@click.option("--wrap/--no-wrap", default=None, help="Wrap cell text (shows embedded newlines)")
+@click.option(
+    "--valign",
+    type=click.Choice(["TOP", "MIDDLE", "BOTTOM"], case_sensitive=False),
+    default=None,
+    help="Vertical alignment",
+)
+@click.option("--autofit-rows", is_flag=True, help="Resize the range's rows to fit their content")
+@click.option("--row-height", type=int, default=None, help="Force an exact row height in pixels")
+@click.pass_context
+def sheets_format(
+    ctx,
+    spreadsheet_id: str,
+    cell_range: str,
+    wrap: bool | None,
+    valign: str | None,
+    autofit_rows: bool,
+    row_height: int | None,
+) -> None:
+    """Format a range: text wrapping, vertical alignment, row heights.
+
+    Wrapping is what makes a newline inside a cell visible, and --autofit-rows
+    then grows each row to its content. Run it after the write, since autofit
+    measures whatever is in the cells at the time.
+    """
+    account = ctx.obj["account"]
+    service = _sheets_service(account)
+    grid = _a1_to_grid_range(service, spreadsheet_id, cell_range)
+
+    requests: list[dict] = []
+    cell_format: dict = {}
+    if wrap is not None:
+        cell_format["wrapStrategy"] = "WRAP" if wrap else "OVERFLOW_CELL"
+    if valign:
+        cell_format["verticalAlignment"] = valign.upper()
+    if cell_format:
+        requests.append({
+            "repeatCell": {
+                "range": grid,
+                "cell": {"userEnteredFormat": cell_format},
+                "fields": ",".join(f"userEnteredFormat.{k}" for k in cell_format),
+            }
+        })
+
+    rows = {
+        "sheetId": grid["sheetId"],
+        "dimension": "ROWS",
+        **{k: grid[k] for k in ("startRowIndex", "endRowIndex") if k in grid},
+    }
+    rows["startIndex"] = rows.pop("startRowIndex", 0)
+    if "endRowIndex" in rows:
+        rows["endIndex"] = rows.pop("endRowIndex")
+
+    if row_height is not None:
+        requests.append({
+            "updateDimensionProperties": {
+                "range": rows,
+                "properties": {"pixelSize": row_height},
+                "fields": "pixelSize",
+            }
+        })
+    elif autofit_rows:
+        requests.append({"autoResizeDimensions": {"dimensions": rows}})
+
+    if not requests:
+        raise click.ClickException("nothing to do: pass --wrap, --valign, --autofit-rows or --row-height")
+
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id, body={"requests": requests}
+    ).execute()
+
+    # Report the resulting heights: an accepted autoResize request is not proof
+    # the rows actually grew, and that is the whole point of calling it.
+    meta = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets(properties(sheetId,title),data(rowMetadata(pixelSize)))",
+        ranges=[cell_range],
+    ).execute()
+    heights = [
+        row.get("pixelSize")
+        for sheet in meta.get("sheets", [])
+        for block in sheet.get("data", [])
+        for row in block.get("rowMetadata", [])
+        if row.get("pixelSize")
+    ]
+    summary = f"[green]Formatted {cell_range} ({len(requests)} request(s))[/green]"
+    if heights:
+        summary += (
+            f" — row heights {min(heights)}-{max(heights)}px"
+            f" across {len(heights)} row(s)"
+        )
+    console.print(summary)
+
+
 # -- Pipeline subgroup ------------------------------------------------------
 
 
