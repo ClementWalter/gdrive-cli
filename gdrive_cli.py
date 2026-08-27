@@ -1265,15 +1265,31 @@ def sheets_info(ctx, spreadsheet_id: str) -> None:
 @click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
 @click.option("--range", "cell_range", required=True, help="A1 range notation (e.g. Sheet1!A1:D10)")
 @click.option("--json-output", is_flag=True, help="Output as JSON instead of table")
+@click.option(
+    "--formulas",
+    is_flag=True,
+    help="Return the underlying formulas instead of their computed values",
+)
 @click.pass_context
-def sheets_read(ctx, spreadsheet_id: str, cell_range: str, json_output: bool) -> None:
-    """Read values from a spreadsheet range."""
+def sheets_read(
+    ctx, spreadsheet_id: str, cell_range: str, json_output: bool, formulas: bool
+) -> None:
+    """Read values from a spreadsheet range.
+
+    By default a cell driven by a formula reads back as whatever the formula
+    evaluates to — so a formula yielding "" is indistinguishable from an empty
+    cell. Pass --formulas before overwriting a range to see what is really there.
+    """
     account = ctx.obj["account"]
     service = _sheets_service(account)
     result = (
         service.spreadsheets()
         .values()
-        .get(spreadsheetId=spreadsheet_id, range=cell_range)
+        .get(
+            spreadsheetId=spreadsheet_id,
+            range=cell_range,
+            valueRenderOption="FORMULA" if formulas else "FORMATTED_VALUE",
+        )
         .execute()
     )
 
