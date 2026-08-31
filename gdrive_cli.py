@@ -1467,6 +1467,74 @@ def _a1_to_grid_range(service, spreadsheet_id: str, cell_range: str) -> dict:
     return grid
 
 
+@sheets.command("clear")
+@click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
+@click.option("--range", "cell_range", required=True, help="A1 range notation")
+@click.pass_context
+def sheets_clear(ctx, spreadsheet_id: str, cell_range: str) -> None:
+    """Empty the values in a range, leaving formatting alone.
+
+    Only values go: a cleared cell keeps its wrapping, alignment and borders, so
+    this is the counterpart to `write`, not a way to reset a range's look.
+    """
+    service = _sheets_service(ctx.obj["account"])
+    result = (
+        service.spreadsheets()
+        .values()
+        .clear(spreadsheetId=spreadsheet_id, range=cell_range, body={})
+        .execute()
+    )
+    console.print(f"[green]Cleared {result.get('clearedRange', cell_range)}[/green]")
+
+
+@sheets.command("insert-rows")
+@click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
+@click.option("--tab", required=True, help="Sheet/tab title")
+@click.option("--before", required=True, type=int, help="1-indexed row the new rows land above")
+@click.option("--count", default=1, show_default=True, type=int, help="How many rows to insert")
+@click.option(
+    "--inherit/--no-inherit",
+    default=True,
+    show_default=True,
+    help="Copy formatting and data validation from the row above",
+)
+@click.pass_context
+def sheets_insert_rows(
+    ctx, spreadsheet_id: str, tab: str, before: int, count: int, inherit: bool
+) -> None:
+    """Insert blank rows, shifting everything below them down.
+
+    Formulas elsewhere in the spreadsheet that point at the shifted cells follow
+    them, but a formula is only carried INTO a new row by --inherit's formatting
+    copy if it was part of the row above's format; a new row's own formulas have
+    to be written afterwards.
+    """
+    service = _sheets_service(ctx.obj["account"])
+    meta = service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    titles = {s["properties"]["title"]: s["properties"]["sheetId"] for s in meta.get("sheets", [])}
+    if tab not in titles:
+        raise click.ClickException(f"no sheet named {tab!r}; have {', '.join(titles)}")
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id,
+        body={
+            "requests": [
+                {
+                    "insertDimension": {
+                        "range": {
+                            "sheetId": titles[tab],
+                            "dimension": "ROWS",
+                            "startIndex": before - 1,
+                            "endIndex": before - 1 + count,
+                        },
+                        "inheritFromBefore": inherit,
+                    }
+                }
+            ]
+        },
+    ).execute()
+    console.print(f"[green]Inserted {count} row(s) above {tab}!{before}[/green]")
+
+
 @sheets.command("format")
 @click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
 @click.option("--range", "cell_range", required=True, help="A1 range notation")
