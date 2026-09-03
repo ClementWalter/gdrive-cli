@@ -88,7 +88,18 @@ gdrive --account bar sheets read --spreadsheet-id ID --range 'A1:D10'
 ```
 
 Use a named account per Google identity. Tokens are not interchangeable
-across Cloud projects or consent screens.
+across Cloud projects or consent screens. Accounts are not interchangeable
+either: `zama` is the work identity and sees work files, while `default` is a
+separate personal project that cannot touch them. Pick the account that owns
+the files, not the default.
+
+The OAuth app is in "Testing" status, so Google expires its refresh token
+roughly weekly. `auth status` reporting `token expired (will auto-refresh)` is
+fine; `token invalid` or not authenticated means re-login in a real terminal:
+
+```bash
+gdrive auth login --account zama --login-hint <email>
+```
 
 ### Required OAuth Scopes
 
@@ -123,6 +134,10 @@ gdrive docs read --url "https://docs.google.com/document/d/ID/edit"
 gdrive docs read --doc-id ID --format text
 gdrive docs read --doc-id ID --format markdown
 gdrive docs read --doc-id ID --format html
+
+# Large docs (meeting transcripts, specs): markdown, redirected to a file, then
+# read the file rather than paging the whole body through the terminal.
+gdrive docs read --url "https://docs.google.com/document/d/ID/edit" --format markdown > doc_ID.md
 ```
 
 ### Drive Operations
@@ -167,6 +182,27 @@ gdrive drive extract-pdfs --folder-id <FOLDER_ID>
 `YYYY-MM-DD HH:MM:SS`, or a full `…Z` ISO timestamp. Only `gdrive auth login`
 opens a browser. A lapsed token on any other command fails with the
 `auth login --account <name>` command to run in a real terminal.
+
+## Gotchas
+
+- **`modifiedTime >` in a query is not authoritative.** Check each hit's own
+  `modifiedTime`. The search index can lag hours behind an edit, so a doc can be
+  missed by one search and only surface in a later one; an empty result for a
+  window does not prove nothing changed in it.
+- **Search is permission-bounded.** A doc not shared with the account is
+  invisible to every query (name, `fullText`, metadata) but readable by id when a
+  link is known. `drive get <id> --json --permissions` shows the owner and
+  `sharedWithMeTime`, which tells you whether a search could ever have found it.
+- **Gemini meeting notes.** The auto `### Summary` compresses lossily and can
+  invert a status; verify load-bearing facts against `### Details` and the
+  `## Transcript` timestamps. Default-titled notes (`Meeting … - Notes by
+  Gemini`) can be renamed in place with
+  `drive rename <id> "<subject> - <original date/time> - Notes by Gemini"`
+  (same file id and links). Keep the original date and the suffix so
+  title-pattern searches still match.
+- **Patching `gdrive_cli.py`.** Do not apply multi-hunk string replaces to the
+  file (truncation risk). Restore it from git and patch one anchored replace at a
+  time, asserting each anchor occurs exactly once.
 
 ### Sheets Operations
 
