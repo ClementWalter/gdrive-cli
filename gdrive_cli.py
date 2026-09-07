@@ -26,6 +26,10 @@ import tempfile
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+# Entry points may be symlinked into a shared bin directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gdrive_auth_store as auth_store
+
 import click
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -127,8 +131,7 @@ def _get_config() -> dict:
 
 def _save_config(config: dict) -> None:
     """Persist config.json to disk."""
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    (CONFIG_DIR / "config.json").write_text(json.dumps(config, indent=2))
+    auth_store.save(CONFIG_DIR / "config.json", config, "gdrive-config", "default")
 
 
 def _get_default_account() -> str:
@@ -138,6 +141,8 @@ def _get_default_account() -> str:
 
 def _token_path(account: str) -> Path:
     """Return the token file path for a named account."""
+    if not account or account in (".", "..") or "/" in account or "\\" in account:
+        raise click.ClickException("Invalid account name")
     return CONFIG_DIR / "accounts" / account / "token.json"
 
 
@@ -245,11 +250,15 @@ def _find_client_secret(account: str) -> Path | None:
     3. shared client_secret.json in the config dir (or the repo, last resort)
     """
     per_account = CONFIG_DIR / "accounts" / account / "client_secret.json"
+    auth_store.restore(per_account, "gdrive-client", account)
     if per_account.exists():
         return per_account
     named = _find_file(f"client_secret_{account}.json")
     if named:
         return named
+    shared = CONFIG_DIR / "client_secret.json"
+    if account != "default":
+        auth_store.restore(shared, "gdrive-client", "default")
     return _find_file("client_secret.json")
 
 
@@ -273,6 +282,9 @@ def _get_credentials(
     """
     token_file = _token_path(account)
     creds = None
+
+    if not force:
+        auth_store.restore(token_file, "gdrive", account)
 
     # `gdrive auth login` always re-consents. Other commands reuse a valid token.
     if not force and token_file.exists():
@@ -319,7 +331,7 @@ def _get_credentials(
 
     raise click.ClickException(
         f"Account '{account}' is not authenticated.\n"
-        f"  Run in a real terminal:\n"
+        f"  Connect Google Drive in Brain, or run:\n"
         f"  gdrive auth login --account {account}"
     )
 
@@ -327,8 +339,7 @@ def _get_credentials(
 def _save_token(creds: Credentials, account: str) -> None:
     """Persist OAuth2 token to disk for a named account."""
     token_file = _token_path(account)
-    token_file.parent.mkdir(parents=True, exist_ok=True)
-    token_file.write_text(creds.to_json())
+    auth_store.save(token_file, json.loads(creds.to_json()), "gdrive", account)
 
 
 def _drive_service(account: str):
@@ -715,11 +726,17 @@ def auth_login(ctx, account_name: str | None, login_hint: str | None) -> None:
 
 
 @auth.command("status")
+@click.option("--json", "as_json", is_flag=True)
+@click.option("--account", "account_name", default=None)
 @click.pass_context
-def auth_status(ctx) -> None:
+def auth_status(ctx, as_json: bool, account_name: str | None) -> None:
     """Check current authentication status."""
-    account = ctx.obj["account"]
+    account = account_name or ctx.obj["account"]
     token_file = _token_path(account)
+
+    if as_json:
+        click.echo(json.dumps(auth_store.status(token_file, "gdrive", account)))
+        return
 
     if token_file.exists():
         try:
@@ -766,6 +783,29 @@ def auth_list() -> None:
     console.print(table)
 
 
+@auth.command("sync")
+@click.option("--account", "account_name", default=None)
+@click.option("--json", "as_json", is_flag=True)
+@click.pass_context
+def auth_sync(ctx, account_name: str | None, as_json: bool) -> None:
+    """Synchronize the selected Google account with the credential vault."""
+    account = account_name or ctx.obj["account"]
+    token = _token_path(account)
+    auth_store.marker(token, ".signed-out").unlink(missing_ok=True)
+    result = auth_store.sync(token, "gdrive", account)
+    client = _find_client_secret(account)
+    if client:
+        auth_store.sync(client, "gdrive-client", account)
+    auth_store.sync(CONFIG_DIR / "config.json", "gdrive-config", "default")
+    click.echo(json.dumps(result) if as_json else f"{account}: {result['source']}")
+    if result["pending"] or not result["configured"]:
+        raise click.exceptions.Exit(3)
+
+
+cli.add_command(auth_status, "auth-status")
+cli.add_command(auth_sync, "auth-sync")
+
+
 @auth.command("set-default")
 @click.argument("account_name")
 def auth_set_default(account_name: str) -> None:
@@ -787,6 +827,8 @@ def auth_logout(ctx) -> None:
     """Remove stored credentials for the current account."""
     account = ctx.obj["account"]
     token_file = _token_path(account)
+    auth_store.write_private(auth_store.marker(token_file, ".signed-out"), {"signed_out": True})
+    auth_store.marker(token_file, ".pending").unlink(missing_ok=True)
     if token_file.exists():
         token_file.unlink()
         console.print(f"[green]Credentials removed for account '{account}'.[/green]")
