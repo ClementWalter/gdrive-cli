@@ -1735,6 +1735,13 @@ def pipeline_folder_summary(ctx, folder_id: str) -> None:
         console.print()
 
 
+# Provider commands share the same execution policy as the app and MCP.
+from pathlib import Path as _PolicyPath
+import sys as _policy_sys
+_policy_sys.path.insert(0, str(_PolicyPath(__file__).resolve().parent))
+from onebrain_policy import install as _install_onebrain_policy
+_install_onebrain_policy(cli, 'gdrive')
+
 if __name__ == "__main__":
     try:
         cli()
