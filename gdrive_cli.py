@@ -1306,7 +1306,8 @@ def sheets_info(ctx, spreadsheet_id: str) -> None:
 @sheets.command("read")
 @click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
 @click.option("--range", "cell_range", required=True, help="A1 range notation (e.g. Sheet1!A1:D10)")
-@click.option("--json-output", is_flag=True, help="Output as JSON instead of table")
+# --json matches every other command; --json-output stays for existing callers.
+@click.option("--json", "--json-output", "json_output", is_flag=True, help="Output as JSON instead of table")
 @click.option(
     "--formulas",
     is_flag=True,
@@ -1337,12 +1338,12 @@ def sheets_read(
 
     values = result.get("values", [])
 
-    if not values:
-        console.print("[yellow]No data found.[/yellow]")
-        return
-
     if json_output:
         console.print_json(json.dumps(values, indent=2))
+        return
+
+    if not values:
+        console.print("[yellow]No data found.[/yellow]")
         return
 
     # Render as rich table — first row as headers if it looks like headers

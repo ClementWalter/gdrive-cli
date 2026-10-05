@@ -207,8 +207,9 @@ opens a browser. A lapsed token on any other command fails with the
 ### Sheets Operations
 
 ```bash
-# Read a range from a spreadsheet
+# Read a range from a spreadsheet (--json: list of rows, [] on an empty range)
 gdrive sheets read --spreadsheet-id <ID> --range 'Sheet1!A1:D10'
+gdrive sheets read --spreadsheet-id <ID> --range 'Sheet1!A1:D10' --json
 
 # Write values to a range
 gdrive sheets write --spreadsheet-id <ID> --range 'Sheet1!A1' \
