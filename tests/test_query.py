@@ -1,3 +1,21 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "pytest==9.1.1",
+#     "click==8.5.0",
+#     "google-api-python-client==2.201.0",
+#     "google-auth-httplib2==0.4.4",
+#     "google-auth-oauthlib==1.5.0",
+#     "pymupdf==1.28.2",
+#     "rich==15.0.0",
+# ]
+#
+# [tool.uv]
+# exclude-newer = "2026-10-27T00:00:00Z"
+# ///
+"""Drive search query building and date normalization. No network."""
+
 import sys
 from pathlib import Path
 
@@ -60,3 +78,7 @@ def test_build_search_query_fulltext_flags():
 def test_build_search_query_requires_selector():
     with pytest.raises(click.ClickException):
         g._build_search_query(None, None, None, None, None, False)
+
+
+if __name__ == "__main__":
+    sys.exit(pytest.main([__file__, *sys.argv[1:]]))

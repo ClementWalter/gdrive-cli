@@ -1,5 +1,7 @@
 # gdrive-cli
 
+**Visibility: public.**
+
 Terminal access to Google Drive, Docs, and Sheets using a desktop OAuth token.
 Search (including raw Drive v3 `q=`, `fullText`, `modifiedTime`, shared drives),
 read docs, download files, rename, extract PDFs, and read/write Sheets.
@@ -104,9 +106,10 @@ gdrive --account foo drive get ID --json --permissions
 gdrive --account foo drive comments ID --json
 gdrive --account foo drive rename ID "New title" --json
 ```
-# Credential synchronization
 
-Brain's `claudine-secret` broker is the credential authority. Google OAuth
+## Credential synchronization
+
+The `claudine-secret` broker is the credential authority. Google OAuth
 tokens remain private (0600), atomic SDK working copies. Credentials load from
 the broker before Google API use; login and token refresh save back through it.
 An unavailable broker preserves the working copy and marks unsynced refreshes
@@ -117,5 +120,5 @@ to work and can be imported explicitly.
 `auth-sync --account default --json` imports an existing account or retries
 pending synchronization; exit 3 means unavailable or still pending. Both commands
 also exist as `auth status` and `auth sync`. Source `local` means the SDK copy
-exists but vault synchronization is unverified. Native setup calls these commands
-internally; users connect through Brain's login screens.
+exists but vault synchronization is unverified. Connect an account with
+`gdrive auth login --account <name>`.

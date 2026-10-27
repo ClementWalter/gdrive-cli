@@ -1,6 +1,26 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "pytest==9.1.1",
+#     "click==8.5.0",
+#     "google-api-python-client==2.201.0",
+#     "google-auth-httplib2==0.4.4",
+#     "google-auth-oauthlib==1.5.0",
+#     "pymupdf==1.28.2",
+#     "rich==15.0.0",
+# ]
+#
+# [tool.uv]
+# exclude-newer = "2026-10-27T00:00:00Z"
+# ///
+"""Legacy config directory migration into ~/.config/gdrive-cli. No network."""
+
 import json
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import gdrive_cli as g
@@ -120,3 +140,7 @@ def test_login_account_ignores_set_default():
     assert g._login_account("foo", None) == "foo"
     assert g._login_account(None, "bar") == "bar"
     assert g._login_account("foo", "bar") == "foo"
+
+
+if __name__ == "__main__":
+    sys.exit(pytest.main([__file__, *sys.argv[1:]]))
