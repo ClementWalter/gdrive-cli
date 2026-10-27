@@ -28,20 +28,14 @@ downloads, renames, and Sheets all go through this CLI.
 
 ## How to invoke
 
-Invoke it as **`gdrive`** — on `$PATH` via a symlink in `~/.local/bin` onto this
-repo's `bin/gdrive`, so it always runs the current checkout: a `git pull`, or
-even an uncommitted edit, takes effect immediately with nothing to reinstall.
+Invoke it as **`gdrive`**. `uv run claudine/scripts/link_clis.py` links this
+repo's `bin/gdrive` into `~/.local/bin`, so it always runs the current checkout:
+a `git pull`, or even an uncommitted edit, takes effect immediately. If `gdrive`
+is not on `$PATH`, run `<skill-dir>/bin/gdrive` (PEP 723: `uv` resolves the
+pinned dependencies on first run).
 
 ```bash
 gdrive --account foo --non-interactive auth status
-```
-
-Examples in this doc are written that way. If `gdrive` is not on `$PATH`, run
-the bundled launcher `bin/gdrive` resolved against this skill's own directory
-(PEP 723 — `uv` resolves deps inline on first run), or link it once:
-
-```bash
-ln -sfn <skill-dir>/bin/gdrive ~/.local/bin/gdrive
 ```
 
 ## Authentication
@@ -89,16 +83,16 @@ gdrive --account bar sheets read --spreadsheet-id ID --range 'A1:D10'
 
 Use a named account per Google identity. Tokens are not interchangeable
 across Cloud projects or consent screens. Accounts are not interchangeable
-either: `zama` is the work identity and sees work files, while `default` is a
-separate personal project that cannot touch them. Pick the account that owns
-the files, not the default.
+either: a work account sees work files, while a personal account is a separate
+project that cannot touch them. Pick the account that owns the files, not the
+default.
 
 The OAuth app is in "Testing" status, so Google expires its refresh token
 roughly weekly. `auth status` reporting `token expired (will auto-refresh)` is
 fine; `token invalid` or not authenticated means re-login in a real terminal:
 
 ```bash
-gdrive auth login --account zama --login-hint <email>
+gdrive auth login --account work --login-hint <email>
 ```
 
 ### Required OAuth Scopes
@@ -121,6 +115,19 @@ gdrive auth login --account zama --login-hint <email>
    The resolver also accepts `~/.config/gdrive-cli/client_secret.json` (shared)
    or `~/.config/gdrive-cli/client_secret_<name>.json`. Keeping secrets in
    `~/.config/gdrive-cli/` guarantees they can never be committed.
+
+## Output conventions
+
+- Default output is human-readable text (rich tables for lists); diagnostics and
+  errors go to stderr.
+- `--json` on `whoami`, `auth status|sync`, `drive search|ls|get|comments|rename`
+  and `sheets read` emits JSON on stdout only. `search` / `ls` emit
+  `{q, n, files}` and are empty-safe (`n: 0`); `sheets read --json` is a list of
+  rows (`[]` on an empty range).
+- `--limit 0` on `drive search` pages until empty.
+- Big reads (long docs, folder dumps) go to a file and are read from there:
+  `gdrive docs read --doc-id ID --format markdown > doc.md`.
+- `--debug` turns on DEBUG logging (stderr).
 
 ## Commands
 
@@ -177,33 +184,6 @@ gdrive drive extract-pdf --file-id <FILE_ID>
 gdrive drive extract-pdfs --folder-id <FOLDER_ID>
 ```
 
-`--json` on `search` / `ls` emits `{q, n, files}` and is empty-safe (`n: 0`).
-`--limit 0` pages until empty. `--modified-after` accepts a date, a
-`YYYY-MM-DD HH:MM:SS`, or a full `…Z` ISO timestamp. Only `gdrive auth login`
-opens a browser. A lapsed token on any other command fails with the
-`auth login --account <name>` command to run in a real terminal.
-
-## Gotchas
-
-- **`modifiedTime >` in a query is not authoritative.** Check each hit's own
-  `modifiedTime`. The search index can lag hours behind an edit, so a doc can be
-  missed by one search and only surface in a later one; an empty result for a
-  window does not prove nothing changed in it.
-- **Search is permission-bounded.** A doc not shared with the account is
-  invisible to every query (name, `fullText`, metadata) but readable by id when a
-  link is known. `drive get <id> --json --permissions` shows the owner and
-  `sharedWithMeTime`, which tells you whether a search could ever have found it.
-- **Gemini meeting notes.** The auto `### Summary` compresses lossily and can
-  invert a status; verify load-bearing facts against `### Details` and the
-  `## Transcript` timestamps. Default-titled notes (`Meeting … - Notes by
-  Gemini`) can be renamed in place with
-  `drive rename <id> "<subject> - <original date/time> - Notes by Gemini"`
-  (same file id and links). Keep the original date and the suffix so
-  title-pattern searches still match.
-- **Patching `gdrive_cli.py`.** Do not apply multi-hunk string replaces to the
-  file (truncation risk). Restore it from git and patch one anchored replace at a
-  time, asserting each anchor occurs exactly once.
-
 ### Sheets Operations
 
 ```bash
@@ -232,14 +212,6 @@ gdrive sheets format --spreadsheet-id <ID> --range 'Sheet1!A2:G50' --row-height 
 gdrive sheets format --spreadsheet-id <ID> --range 'Sheet1!A7:G7' --row-height 71
 ```
 
-A `\n` inside a written value only shows up if the cell wraps, so pair
-multi-line writes with `--wrap`. **`--autofit-rows` does not grow rows** —
-Sheets' `autoResizeDimensions` leaves them at the default height and the content
-stays clipped; use an explicit `--row-height` (roughly 21px per line) instead.
-Heights persist, so reset a block to its baseline before growing individual
-rows, or a row that loses content stays tall. `format` prints the resulting
-pixel heights, so the outcome is verified rather than assumed.
-
 ### Pipeline: PDF -> Sheets
 
 ```bash
@@ -249,6 +221,57 @@ gdrive pipeline pdf-to-table --file-id <PDF_FILE_ID>
 # Extract data from all PDFs in a folder, show summary
 gdrive pipeline folder-summary --folder-id <FOLDER_ID>
 ```
+
+## Recipes
+
+```bash
+# "Find the doc about X edited since Monday" (verify each hit's modifiedTime)
+gdrive --account foo drive search --full-text X --type doc --modified-after 2026-10-26 --json --limit 0
+
+# "Read this Google Doc" (URL as given by the user)
+gdrive --account foo docs read --url "https://docs.google.com/document/d/ID/edit" --format markdown > doc.md
+
+# "Who owns this file / is it shared with me?"
+gdrive --account foo drive get ID --permissions --json
+
+# "What are the formulas in this sheet?"
+gdrive --account foo sheets read --spreadsheet-id ID --range 'Sheet1!A1:H50' --formulas --json
+
+# "Put the PDFs of this folder into a table"
+gdrive --account foo pipeline folder-summary --folder-id FOLDER_ID
+```
+
+## Gotchas
+
+- **`modifiedTime >` in a query is not authoritative.** Check each hit's own
+  `modifiedTime`. The search index can lag hours behind an edit, so a doc can be
+  missed by one search and only surface in a later one; an empty result for a
+  window does not prove nothing changed in it.
+- **Search is permission-bounded.** A doc not shared with the account is
+  invisible to every query (name, `fullText`, metadata) but readable by id when a
+  link is known. `drive get <id> --json --permissions` shows the owner and
+  `sharedWithMeTime`, which tells you whether a search could ever have found it.
+- **Gemini meeting notes.** The auto `### Summary` compresses lossily and can
+  invert a status; verify load-bearing facts against `### Details` and the
+  `## Transcript` timestamps. Default-titled notes (`Meeting … - Notes by
+  Gemini`) can be renamed in place with
+  `drive rename <id> "<subject> - <original date/time> - Notes by Gemini"`
+  (same file id and links). Keep the original date and the suffix so
+  title-pattern searches still match.
+- **Patching `gdrive_cli.py`.** Do not apply multi-hunk string replaces to the
+  file (truncation risk). Restore it from git and patch one anchored replace at a
+  time, asserting each anchor occurs exactly once.
+- **Only `gdrive auth login` opens a browser.** A lapsed token on any other
+  command fails with the `auth login --account <name>` command to run in a real
+  terminal. `--modified-after` accepts a date, a `YYYY-MM-DD HH:MM:SS`, or a
+  full `…Z` ISO timestamp.
+- **Sheets row heights.** A `\n` inside a written value only shows up if the cell wraps, so pair
+  multi-line writes with `--wrap`. **`--autofit-rows` does not grow rows** —
+  Sheets' `autoResizeDimensions` leaves them at the default height and the content
+  stays clipped; use an explicit `--row-height` (roughly 21px per line) instead.
+  Heights persist, so reset a block to its baseline before growing individual
+  rows, or a row that loses content stays tall. `format` prints the resulting
+  pixel heights, so the outcome is verified rather than assumed.
 
 ## Key Details
 

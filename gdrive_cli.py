@@ -1,14 +1,17 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.15"
+# requires-python = ">=3.11"
 # dependencies = [
-#     "click",
-#     "google-api-python-client",
-#     "google-auth-httplib2",
-#     "google-auth-oauthlib",
-#     "pymupdf",
-#     "rich",
+#     "click==8.5.0",
+#     "google-api-python-client==2.201.0",
+#     "google-auth-httplib2==0.4.4",
+#     "google-auth-oauthlib==1.5.0",
+#     "pymupdf==1.28.2",
+#     "rich==15.0.0",
 # ]
+#
+# [tool.uv]
+# exclude-newer = "2026-10-27T00:00:00Z"
 # ///
 """Google Drive gateway CLI — docs, sheets, files, with multi-account support.
 
@@ -331,7 +334,7 @@ def _get_credentials(
 
     raise click.ClickException(
         f"Account '{account}' is not authenticated.\n"
-        f"  Connect Google Drive in Brain, or run:\n"
+        f"  Run:\n"
         f"  gdrive auth login --account {account}"
     )
 
@@ -625,7 +628,7 @@ def _export_google_doc(file_id: str, mime_type: str, account: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-@click.group()
+@click.group(epilog="\b\nExamples:\n  gdrive drive search budget\n  gdrive --account foo docs read --url 'https://docs.google.com/document/d/ID/edit'\n  gdrive sheets read --spreadsheet-id ID --range 'Sheet1!A1:D10' --json")
 @click.option("--debug", is_flag=True, help="Enable debug logging")
 @click.option("--account", default=None, help="Account name (default: from config.json)")
 @click.option(
@@ -665,7 +668,7 @@ def _login_account(account_name: str | None, account_flag: str | None) -> str:
     return account_name or account_flag or "default"
 
 
-@cli.command("whoami")
+@cli.command("whoami", epilog="\b\nExamples:\n  gdrive whoami\n  gdrive --account foo whoami --json")
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON")
 @click.pass_context
 def whoami(ctx, as_json: bool) -> None:
@@ -689,12 +692,12 @@ def whoami(ctx, as_json: bool) -> None:
 # -- Auth subgroup ----------------------------------------------------------
 
 
-@cli.group()
+@cli.group(epilog="\b\nExamples:\n  gdrive auth status\n  gdrive auth login --account foo --login-hint foo@example.com")
 def auth() -> None:
     """Manage Google OAuth2 authentication."""
 
 
-@auth.command("login")
+@auth.command("login", epilog="\b\nExamples:\n  gdrive auth login\n  gdrive auth login --account foo --login-hint foo@example.com")
 @click.option("--account", "account_name", default=None, help="Account name to create/update")
 @click.option("--login-hint", default=None, help="Email to pre-select in Google account chooser")
 @click.pass_context
@@ -725,7 +728,7 @@ def auth_login(ctx, account_name: str | None, login_hint: str | None) -> None:
     console.print(f"{info['account']}{flag}  {email}{extra}")
 
 
-@auth.command("status")
+@auth.command("status", epilog="\b\nExamples:\n  gdrive auth status\n  gdrive auth status --account foo --json")
 @click.option("--json", "as_json", is_flag=True)
 @click.option("--account", "account_name", default=None)
 @click.pass_context
@@ -761,7 +764,7 @@ def auth_status(ctx, as_json: bool, account_name: str | None) -> None:
     console.print(f"[red]Account '{account}' not authenticated. Run: auth login --account {account}[/red]")
 
 
-@auth.command("list")
+@auth.command("list", epilog="\b\nExamples:\n  gdrive auth list")
 def auth_list() -> None:
     """List all authenticated accounts."""
     accounts = _list_accounts()
@@ -783,7 +786,7 @@ def auth_list() -> None:
     console.print(table)
 
 
-@auth.command("sync")
+@auth.command("sync", epilog="\b\nExamples:\n  gdrive auth sync --account foo\n  gdrive auth sync --account foo --json")
 @click.option("--account", "account_name", default=None)
 @click.option("--json", "as_json", is_flag=True)
 @click.pass_context
@@ -806,7 +809,7 @@ cli.add_command(auth_status, "auth-status")
 cli.add_command(auth_sync, "auth-sync")
 
 
-@auth.command("set-default")
+@auth.command("set-default", epilog="\b\nExamples:\n  gdrive auth set-default foo")
 @click.argument("account_name")
 def auth_set_default(account_name: str) -> None:
     """Set the default account."""
@@ -821,7 +824,7 @@ def auth_set_default(account_name: str) -> None:
     console.print(f"[green]Default account set to '{account_name}'.[/green]")
 
 
-@auth.command("logout")
+@auth.command("logout", epilog="\b\nExamples:\n  gdrive --account foo auth logout")
 @click.pass_context
 def auth_logout(ctx) -> None:
     """Remove stored credentials for the current account."""
@@ -839,12 +842,12 @@ def auth_logout(ctx) -> None:
 # -- Docs subgroup ----------------------------------------------------------
 
 
-@cli.group()
+@cli.group(epilog="\b\nExamples:\n  gdrive docs read --url 'https://docs.google.com/document/d/ID/edit'")
 def docs() -> None:
     """Google Docs operations."""
 
 
-@docs.command("read")
+@docs.command("read", epilog="\b\nExamples:\n  gdrive docs read --url 'https://docs.google.com/document/d/ID/edit'\n  gdrive docs read --doc-id ID --format markdown > doc.md")
 @click.option("--doc-id", default=None, help="Google Doc ID")
 @click.option("--url", default=None, help="Full Google Docs URL")
 @click.option(
@@ -884,12 +887,12 @@ def docs_read(ctx, doc_id: str | None, url: str | None, output_format: str) -> N
 # -- Drive subgroup ---------------------------------------------------------
 
 
-@cli.group()
+@cli.group(epilog="\b\nExamples:\n  gdrive drive search budget --type spreadsheet\n  gdrive drive get FILE_ID --json")
 def drive() -> None:
     """Google Drive operations."""
 
 
-@drive.command("ls")
+@drive.command("ls", epilog="\b\nExamples:\n  gdrive drive ls --folder-id FOLDER_ID\n  gdrive drive ls --folder-id FOLDER_ID --mime-type application/pdf --json")
 @click.option("--folder-id", required=True, help="Drive folder ID")
 @click.option("--mime-type", default=None, help="Filter by MIME type (e.g. application/pdf)")
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON")
@@ -929,7 +932,7 @@ def drive_ls(ctx, folder_id: str, mime_type: str | None, as_json: bool) -> None:
     console.print(table)
 
 
-@drive.command("search")
+@drive.command("search", epilog="\b\nExamples:\n  gdrive drive search budget\n  gdrive drive search invoices --type pdf --limit 50\n  gdrive drive search --full-text foo --type doc --modified-after 2026-01-01 --json --limit 0\n  gdrive drive search --q \"name contains 'foo' and trashed = false\" --json")
 @click.argument("query", required=False, default=None)
 @click.option(
     "--q",
@@ -1039,7 +1042,7 @@ def drive_search(
     console.print(table)
 
 
-@drive.command("get")
+@drive.command("get", epilog="\b\nExamples:\n  gdrive drive get FILE_ID --json\n  gdrive drive get 'https://docs.google.com/document/d/ID/edit' --permissions --json")
 @click.argument("file")
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON")
 @click.option("--permissions", "with_permissions", is_flag=True, help="Include sharing ACL")
@@ -1095,7 +1098,7 @@ def drive_get(ctx, file: str, as_json: bool, with_permissions: bool) -> None:
         console.print(ptable)
 
 
-@drive.command("comments")
+@drive.command("comments", epilog="\b\nExamples:\n  gdrive drive comments FILE_ID --json")
 @click.argument("file")
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON")
 @click.pass_context
@@ -1127,7 +1130,7 @@ def drive_comments(ctx, file: str, as_json: bool) -> None:
         console.print()
 
 
-@drive.command("download")
+@drive.command("download", epilog="\b\nExamples:\n  gdrive drive download --file-id FILE_ID --output /tmp/file.pdf")
 @click.option("--file-id", required=True, help="Drive file ID")
 @click.option("--output", "-o", required=True, help="Local output path")
 @click.pass_context
@@ -1138,7 +1141,7 @@ def drive_download(ctx, file_id: str, output: str) -> None:
     console.print(f"[green]Downloaded to {path}[/green]")
 
 
-@drive.command("rename")
+@drive.command("rename", epilog="\b\nExamples:\n  gdrive drive rename FILE_ID 'New title' --json")
 @click.argument("file_id")
 @click.argument("new_title")
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON")
@@ -1179,7 +1182,7 @@ def drive_rename(ctx, file_id: str, new_title: str, as_json: bool) -> None:
         )
 
 
-@drive.command("import")
+@drive.command("import", epilog="\b\nExamples:\n  gdrive drive import --input notes.md --title 'Notes'\n  gdrive drive import -i table.csv --type sheet --parent-id FOLDER_ID")
 @click.option("--input", "-i", "input_path", required=True, help="Local file to import (html, md, docx, txt, csv)")
 @click.option("--title", default=None, help="Title for the created file (defaults to the input filename)")
 @click.option(
@@ -1236,7 +1239,7 @@ def drive_import(ctx, input_path: str, title: str | None, google_type: str, pare
     console.print(f"https://docs.google.com/{url_kind}/d/{created['id']}/edit")
 
 
-@drive.command("extract-pdf")
+@drive.command("extract-pdf", epilog="\b\nExamples:\n  gdrive drive extract-pdf --file-id FILE_ID")
 @click.option("--file-id", required=True, help="Drive PDF file ID")
 @click.pass_context
 def drive_extract_pdf(ctx, file_id: str) -> None:
@@ -1246,7 +1249,7 @@ def drive_extract_pdf(ctx, file_id: str) -> None:
     console.print(text)
 
 
-@drive.command("extract-pdfs")
+@drive.command("extract-pdfs", epilog="\b\nExamples:\n  gdrive drive extract-pdfs --folder-id FOLDER_ID")
 @click.option("--folder-id", required=True, help="Drive folder ID containing PDFs")
 @click.pass_context
 def drive_extract_pdfs(ctx, folder_id: str) -> None:
@@ -1270,12 +1273,12 @@ def drive_extract_pdfs(ctx, folder_id: str) -> None:
 # -- Sheets subgroup --------------------------------------------------------
 
 
-@cli.group()
+@cli.group(epilog="\b\nExamples:\n  gdrive sheets info --spreadsheet-id ID\n  gdrive sheets read --spreadsheet-id ID --range 'Sheet1!A1:D10' --json")
 def sheets() -> None:
     """Google Sheets operations."""
 
 
-@sheets.command("info")
+@sheets.command("info", epilog="\b\nExamples:\n  gdrive sheets info --spreadsheet-id ID")
 @click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
 @click.pass_context
 def sheets_info(ctx, spreadsheet_id: str) -> None:
@@ -1303,7 +1306,7 @@ def sheets_info(ctx, spreadsheet_id: str) -> None:
     console.print(table)
 
 
-@sheets.command("read")
+@sheets.command("read", epilog="\b\nExamples:\n  gdrive sheets read --spreadsheet-id ID --range 'Sheet1!A1:D10'\n  gdrive sheets read --spreadsheet-id ID --range 'Sheet1!A1:D10' --formulas --json")
 @click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
 @click.option("--range", "cell_range", required=True, help="A1 range notation (e.g. Sheet1!A1:D10)")
 # --json matches every other command; --json-output stays for existing callers.
@@ -1359,7 +1362,7 @@ def sheets_read(
     console.print(table)
 
 
-@sheets.command("write")
+@sheets.command("write", epilog="\b\nExamples:\n  gdrive sheets write --spreadsheet-id ID --range 'Sheet1!A1' --values '[[\"Name\",\"Amount\"],[\"Alice\",100]]'")
 @click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
 @click.option("--range", "cell_range", required=True, help="A1 range notation")
 @click.option("--values", required=True, help="JSON 2D array of values")
@@ -1398,7 +1401,7 @@ def sheets_write(
     console.print(f"[green]Updated {updated} cells in {cell_range}[/green]")
 
 
-@sheets.command("write-formula")
+@sheets.command("write-formula", epilog="\b\nExamples:\n  gdrive sheets write-formula --spreadsheet-id ID --range 'Sheet1!B2' --formula '=SUM(C2:C10)'")
 @click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
 @click.option("--range", "cell_range", required=True, help="Target cell (e.g. Sheet1!B2)")
 @click.option("--formula", required=True, help="Formula string (e.g. =SUM(A1:A10))")
@@ -1419,7 +1422,7 @@ def sheets_write_formula(ctx, spreadsheet_id: str, cell_range: str, formula: str
     console.print(f"[green]Formula written to {cell_range}[/green]")
 
 
-@sheets.command("batch-write")
+@sheets.command("batch-write", epilog="\b\nExamples:\n  gdrive sheets batch-write --spreadsheet-id ID --data '[{\"range\":\"Sheet1!A1\",\"values\":[[\"hello\"]]}]'")
 @click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
 @click.option(
     "--data",
@@ -1510,7 +1513,7 @@ def _a1_to_grid_range(service, spreadsheet_id: str, cell_range: str) -> dict:
     return grid
 
 
-@sheets.command("clear")
+@sheets.command("clear", epilog="\b\nExamples:\n  gdrive sheets clear --spreadsheet-id ID --range 'Sheet1!A2:D50'")
 @click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
 @click.option("--range", "cell_range", required=True, help="A1 range notation")
 @click.pass_context
@@ -1530,7 +1533,7 @@ def sheets_clear(ctx, spreadsheet_id: str, cell_range: str) -> None:
     console.print(f"[green]Cleared {result.get('clearedRange', cell_range)}[/green]")
 
 
-@sheets.command("insert-rows")
+@sheets.command("insert-rows", epilog="\b\nExamples:\n  gdrive sheets insert-rows --spreadsheet-id ID --tab Sheet1 --before 5 --count 2")
 @click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
 @click.option("--tab", required=True, help="Sheet/tab title")
 @click.option("--before", required=True, type=int, help="1-indexed row the new rows land above")
@@ -1578,7 +1581,7 @@ def sheets_insert_rows(
     console.print(f"[green]Inserted {count} row(s) above {tab}!{before}[/green]")
 
 
-@sheets.command("format")
+@sheets.command("format", epilog="\b\nExamples:\n  gdrive sheets format --spreadsheet-id ID --range 'Sheet1!G2:G50' --wrap --valign TOP\n  gdrive sheets format --spreadsheet-id ID --range 'Sheet1!A2:G50' --row-height 21")
 @click.option("--spreadsheet-id", required=True, help="Spreadsheet ID")
 @click.option("--range", "cell_range", required=True, help="A1 range notation")
 @click.option("--wrap/--no-wrap", default=None, help="Wrap cell text (shows embedded newlines)")
@@ -1678,12 +1681,12 @@ def sheets_format(
 # -- Pipeline subgroup ------------------------------------------------------
 
 
-@cli.group()
+@cli.group(epilog="\b\nExamples:\n  gdrive pipeline pdf-to-table --file-id FILE_ID")
 def pipeline() -> None:
     """Compound operations: PDF extraction -> Sheets."""
 
 
-@pipeline.command("pdf-to-table")
+@pipeline.command("pdf-to-table", epilog="\b\nExamples:\n  gdrive pipeline pdf-to-table --file-id FILE_ID")
 @click.option("--file-id", required=True, help="Drive PDF file ID")
 @click.pass_context
 def pipeline_pdf_to_table(ctx, file_id: str) -> None:
@@ -1697,7 +1700,7 @@ def pipeline_pdf_to_table(ctx, file_id: str) -> None:
     console.print(text)
 
 
-@pipeline.command("folder-summary")
+@pipeline.command("folder-summary", epilog="\b\nExamples:\n  gdrive pipeline folder-summary --folder-id FOLDER_ID")
 @click.option("--folder-id", required=True, help="Drive folder ID")
 @click.pass_context
 def pipeline_folder_summary(ctx, folder_id: str) -> None:
@@ -1735,13 +1738,6 @@ def pipeline_folder_summary(ctx, folder_id: str) -> None:
             console.print(f"[red]Error: {exc}[/red]")
         console.print()
 
-
-# Provider commands share the same execution policy as the app and MCP.
-from pathlib import Path as _PolicyPath
-import sys as _policy_sys
-_policy_sys.path.insert(0, str(_PolicyPath(__file__).resolve().parent))
-from onebrain_policy import install as _install_onebrain_policy
-_install_onebrain_policy(cli, 'gdrive')
 
 if __name__ == "__main__":
     try:

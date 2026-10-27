@@ -1,11 +1,30 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "pytest==9.1.1",
+#     "click==8.5.0",
+#     "google-api-python-client==2.201.0",
+#     "google-auth-httplib2==0.4.4",
+#     "google-auth-oauthlib==1.5.0",
+#     "pymupdf==1.28.2",
+#     "rich==15.0.0",
+# ]
+#
+# [tool.uv]
+# exclude-newer = "2026-10-27T00:00:00Z"
+# ///
 """Credential broker integration without live vault or Google access."""
 
 import json
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 from click.testing import CliRunner
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import gdrive_cli as cli
 import gdrive_auth_store as store
 
@@ -137,3 +156,6 @@ def test_cli_process_status_without_broker(tmp_path):
                             capture_output=True, text=True, timeout=20)
     assert (result.returncode, json.loads(result.stdout)) == (0, {"connector": "gdrive", "account": "default", "source": "unavailable", "configured": False, "pending": False, "last_sync": None})
 
+
+if __name__ == "__main__":
+    sys.exit(pytest.main([__file__, *sys.argv[1:]]))
