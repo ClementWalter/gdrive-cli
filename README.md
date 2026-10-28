@@ -133,3 +133,9 @@ pending synchronization; exit 3 means unavailable or still pending. Both command
 also exist as `auth status` and `auth sync`. Source `local` means the SDK copy
 exists but vault synchronization is unverified. Connect an account with
 `gdrive auth login --account <name>`.
+
+## Privacy Policy
+
+The Claude Desktop extension built from this repository keeps your data on your
+Mac and talks only to the service it connects to. Full policy:
+<https://clementwalter.github.io/claude-extensions/privacy/>
