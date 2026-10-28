@@ -85,9 +85,20 @@ gdrive --account bar drive search "quarterly report"
 ```
 
 Bare `gdrive auth login` always writes the `default` slot, even if
-`auth set-default` points at another account. Only `gdrive auth login`
-opens a browser. A lapsed token on any other command fails with the
-`auth login` invocation to run in a real terminal.
+`auth set-default` points at another account. A lapsed token on any other
+command fails naming the command to run.
+
+Without a terminal, `gdrive google-setup` prints the Google Cloud Console steps
+(own project, Drive / Sheets / Gmail APIs, Google Auth Platform, a Desktop app
+client) for Claude in Chrome to walk through, and `gdrive connect` runs the
+sign-in from a detached local helper and returns at once. `accounts`,
+`set-default` and `disconnect` manage accounts outside the `auth` group.
+
+## Claude Desktop extension
+
+`mcp-bridge pack gdrive-cli --version X.Y.Z` builds `gdrive-cli-X.Y.Z.mcpb`
+from [`mcpb.json`](mcpb.json): each command is a tool, and the settings take an
+optional OAuth client file or client ID / secret.
 
 ## Usage
 

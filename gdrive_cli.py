@@ -24,14 +24,17 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 # Entry points may be symlinked into a shared bin directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gdrive_auth_store as auth_store
+import gdrive_setup as setup
 
 import click
 from google.auth.transport.requests import Request
@@ -265,6 +268,64 @@ def _find_client_secret(account: str) -> Path | None:
     return _find_file("client_secret.json")
 
 
+def _not_connected(account: str) -> str:
+    """The next step for an account without a token, for Claude Desktop and for a terminal."""
+    return (
+        f"Google account '{account}' is not connected.\n"
+        f"  In Claude: call the `connect` tool (account: {account}); the first time, call `google_setup` "
+        f"for the Google Cloud steps.\n"
+        f"  In a terminal: gdrive --account {account} connect"
+    )
+
+
+# email-cli shares the Google Cloud project and OAuth client with this CLI.
+EMAIL_CONFIG_DIR = Path.home() / ".config" / "email-cli"
+
+
+def _email_client_secret(account: str) -> Path | None:
+    for path in (EMAIL_CONFIG_DIR / "accounts" / account / "client_secret.json",
+                 EMAIL_CONFIG_DIR / "client_secret.json"):
+        if path.is_file():
+            return path
+    return None
+
+
+def _resolve_client(account: str, client_file: str | None = None, *, downloads: bool = False) -> tuple[dict, str, Path | None]:
+    """The OAuth client for `connect`: (client document, where it came from, stored path or None).
+
+    An explicit file wins, then the extension settings, then this CLI's stored
+    clients, then email-cli's, then (for `connect` only) the newest JSON
+    Google's "Download JSON" left in ~/Downloads.
+    """
+    if client_file:
+        return setup.read_client_file(Path(client_file)), client_file, None
+    from_env = setup.env_client()
+    if from_env:
+        return from_env[0], from_env[1], None
+    stored = _find_client_secret(account)
+    if stored:
+        return setup.read_client_file(stored), str(stored), stored
+    email = _email_client_secret(account)
+    if email:
+        return setup.read_client_file(email), f"Email extension ({email})", None
+    download = setup.newest_download(Path.home()) if downloads else None
+    if download:
+        return setup.read_client_file(download), str(download), None
+    raise setup.SetupError(
+        "No Google OAuth client is configured. Call `google_setup` for the steps to create one "
+        "(Desktop app client, Download JSON), then call `connect` again."
+    )
+
+
+def _store_client(client: dict) -> Path:
+    """Keep the client where both this CLI and email-cli look for it, private like a token."""
+    path = CONFIG_DIR / "client_secret.json"
+    current = json.loads(path.read_text()) if path.is_file() else None
+    if current != client:
+        auth_store.save(path, client, "gdrive-client", "default")
+    return path
+
+
 def _get_credentials(
     account: str,
     login_hint: str | None = None,
@@ -332,11 +393,7 @@ def _get_credentials(
             str(sa_file), scopes=SCOPES
         )
 
-    raise click.ClickException(
-        f"Account '{account}' is not authenticated.\n"
-        f"  Run:\n"
-        f"  gdrive auth login --account {account}"
-    )
+    raise click.ClickException(_not_connected(account))
 
 
 def _save_token(creds: Credentials, account: str) -> None:
@@ -751,7 +808,7 @@ def auth_status(ctx, as_json: bool, account_name: str | None) -> None:
                 console.print(f"[yellow]OAuth2 ({account}): token expired (will auto-refresh)[/yellow]")
                 return
             else:
-                console.print(f"[red]OAuth2 ({account}): token invalid. Run: auth login --account {account}[/red]")
+                console.print(f"[red]OAuth2 ({account}): token invalid. {_not_connected(account)}[/red]")
         except Exception as exc:
             console.print(f"[red]OAuth2 ({account}): error reading token: {exc}[/red]")
 
@@ -761,17 +818,21 @@ def auth_status(ctx, as_json: bool, account_name: str | None) -> None:
         console.print(f"[yellow]Service account: {sa_file} (only sees shared files)[/yellow]")
         return
 
-    console.print(f"[red]Account '{account}' not authenticated. Run: auth login --account {account}[/red]")
+    console.print(f"[red]{_not_connected(account)}[/red]")
 
 
-@auth.command("list", epilog="\b\nExamples:\n  gdrive auth list")
-def auth_list() -> None:
-    """List all authenticated accounts."""
+@auth.command("list", epilog="\b\nExamples:\n  gdrive accounts\n  gdrive accounts --json")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+def auth_list(as_json: bool) -> None:
+    """List the connected Google accounts and which one is the default."""
     accounts = _list_accounts()
     default = _get_default_account()
 
+    if as_json:
+        click.echo(json.dumps([{"account": name, "default": name == default} for name in accounts]))
+        return
     if not accounts:
-        console.print("[yellow]No authenticated accounts. Run: auth login[/yellow]")
+        console.print(f"[yellow]{_not_connected(default)}[/yellow]")
         return
 
     table = Table(title="Authenticated Accounts")
@@ -809,14 +870,14 @@ cli.add_command(auth_status, "auth-status")
 cli.add_command(auth_sync, "auth-sync")
 
 
-@auth.command("set-default", epilog="\b\nExamples:\n  gdrive auth set-default foo")
+@auth.command("set-default", epilog="\b\nExamples:\n  gdrive set-default work")
 @click.argument("account_name")
 def auth_set_default(account_name: str) -> None:
     """Set the default account."""
     token_file = _token_path(account_name)
     if not token_file.exists():
         raise click.ClickException(
-            f"Account '{account_name}' not found. Authenticate first: auth login --account {account_name}"
+            _not_connected(account_name)
         )
     config = _get_config()
     config["default_account"] = account_name
@@ -837,6 +898,132 @@ def auth_logout(ctx) -> None:
         console.print(f"[green]Credentials removed for account '{account}'.[/green]")
     else:
         console.print(f"[yellow]No stored credentials for account '{account}'.[/yellow]")
+
+
+# Tool-callable names: MCP bridges hide everything under `auth`.
+cli.add_command(auth_list, "accounts")
+cli.add_command(auth_set_default, "set-default")
+
+# -- Setup without a terminal ----------------------------------------------
+
+
+@cli.command("google-setup", epilog="\b\nExamples:\n  gdrive google-setup")
+def google_setup() -> None:
+    """Step-by-step Google Cloud setup for Claude to walk the user through in Chrome.
+
+    Starts with what is already configured (OAuth client, connected accounts),
+    then the exact Google Cloud Console steps: project, APIs, Google Auth
+    Platform (audience, test user, publishing), a Desktop app OAuth client and
+    its JSON, then `connect`. One project and client serve Drive and Gmail.
+    """
+    account = click.get_current_context().obj["account"]
+    try:
+        client, label, _ = _resolve_client(account)
+        project = client["installed"].get("project_id")
+    except setup.SetupError:
+        label = project = None
+    click.echo(setup.guide(label, project, _list_accounts(), _email_client_secret(account)), nl=False)
+
+
+def _connect_state(account: str) -> Path:
+    return _token_path(account).parent / "connect.json"
+
+
+def _connect_helper(account: str, client_file: str, login_hint: str | None) -> None:
+    """Serve the consent redirect, then store the token; progress goes to the state file."""
+    state = _connect_state(account)
+
+    def report(status: str, **fields) -> None:
+        auth_store.write_private(state, {"status": status, "account": account, **fields})
+
+    try:
+        creds = setup.consent(setup.read_client_file(Path(client_file)), SCOPES, report, login_hint=login_hint)
+        _save_token(creds, account)
+        # The first account connected becomes the one tools use without --account.
+        if _get_default_account() not in _list_accounts():
+            config = _get_config()
+            config["default_account"] = account
+            _save_config(config)
+        try:
+            email = _whoami(account).get("email")
+        except click.ClickException:
+            email = None
+        report("connected", email=email)
+    except Exception as exc:  # The spawning command reads the outcome from the state file.
+        message = str(exc) if isinstance(exc, setup.SetupError) else f"Google sign-in failed ({exc.__class__.__name__}: {exc})."
+        report("error", error=message)
+
+
+@cli.command("connect", epilog="\b\nExamples:\n  gdrive connect\n  gdrive connect --account work --login-hint me@company.com\n  gdrive connect --client-file ~/Downloads/client_secret_123.apps.googleusercontent.com.json --wait 120")
+@click.option("--account", "account_name", default=None, help="Account slot to connect (default: the current account).")
+@click.option("--login-hint", default=None, help="Google address to pre-select on the sign-in page.")
+@click.option("--client-file", default=None, help="Path to the OAuth client JSON from Google's Download JSON (default: extension settings, the stored client, else the newest client_secret_*.json in ~/Downloads).")
+@click.option("--wait", "wait_seconds", type=click.IntRange(0, setup.CONSENT_SECONDS), default=0, show_default=True, help="Seconds to wait for the user to finish signing in; 0 returns as soon as the page is open.")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+@click.option("--helper", is_flag=True, hidden=True, help="Serve the sign-in redirect in this process.")
+@click.pass_context
+def connect(ctx, account_name: str | None, login_hint: str | None, client_file: str | None,
+            wait_seconds: int, as_json: bool, helper: bool) -> None:
+    """Connect a Google account: opens Google's sign-in page in the browser; no terminal needed.
+
+    The user picks the account and ticks every access box; the token is then
+    stored for this account (private file). Returns as soon as the page is open
+    (or after --wait seconds); check with `whoami`. The page answers for 5 minutes.
+    Needs a Desktop app OAuth client: see `google-setup`.
+    """
+    account = account_name or ctx.obj["account"]
+    if helper:
+        _connect_helper(account, client_file, login_hint)
+        return
+    try:
+        client, label, stored = _resolve_client(account, client_file, downloads=True)
+    except setup.SetupError as exc:
+        raise click.ClickException(str(exc)) from exc
+    stored = stored or _store_client(client)
+    state = _connect_state(account)
+    state.unlink(missing_ok=True)
+    command = [sys.executable, str(Path(__file__).resolve()), "--account", account, "connect", "--helper",
+               "--client-file", str(stored)] + (["--login-hint", login_hint] if login_hint else [])
+    # Detached so the redirect listener outlives this command, which an MCP client waits on.
+    subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    start = time.monotonic()
+    while True:
+        result = json.loads(state.read_text()) if state.exists() else {}
+        elapsed = time.monotonic() - start
+        # The helper gets 15 s to open the page; --wait then bounds the wait for the user.
+        if result.get("status") in ("connected", "error") or (result and elapsed >= wait_seconds) or (not result and elapsed >= 15):
+            break
+        time.sleep(0.2)
+    if not result:
+        raise click.ClickException(f"The sign-in helper did not start; run `gdrive --account {account} connect --helper --client-file {stored}` to see why.")
+    if result["status"] == "error":
+        raise click.ClickException(result["error"])
+    result["client"] = label
+    if as_json:
+        click.echo(json.dumps(result))
+    elif result["status"] == "connected":
+        click.echo(f"Connected {result.get('email') or account} as account '{account}'.")
+    else:
+        click.echo(
+            f"A Google sign-in page opened in the browser ({result['url']}). The user picks their Google account, "
+            "clicks Advanced → Go to ... (unsafe) if Google warns the app is unverified, ticks every access box and "
+            "clicks Continue. Then check with `whoami`."
+        )
+
+
+@cli.command("disconnect", epilog="\b\nExamples:\n  gdrive disconnect --account work\n  gdrive disconnect --account work --yes")
+@click.option("--account", "account_name", default=None, help="Account to disconnect (default: the current account).")
+@click.option("--yes", is_flag=True, help="Remove the token; without it, only say what would be removed.")
+@click.pass_context
+def disconnect(ctx, account_name: str | None, yes: bool) -> None:
+    """Forget the stored Google token of one account on this computer (dry run unless --yes)."""
+    account = account_name or ctx.obj["account"]
+    if not yes:
+        click.echo(f"Would remove the stored Google token of account '{account}'. Re-run with --yes.")
+        return
+    ctx.obj["account"] = account
+    ctx.invoke(auth_logout)
 
 
 # -- Docs subgroup ----------------------------------------------------------

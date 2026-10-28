@@ -68,6 +68,24 @@ gdrive auth set-default foo
 gdrive --account foo auth logout
 ```
 
+Without a terminal (Claude Desktop extension, every name is a tool):
+
+```bash
+gdrive google-setup                 # Cloud Console steps for Claude in Chrome, from the current state
+gdrive connect                      # opens Google's sign-in page, returns at once; check with whoami
+gdrive connect --account work --login-hint me@company.com --wait 120
+gdrive accounts --json              # connected accounts and the default
+gdrive set-default work
+gdrive disconnect --account work --yes
+```
+
+`connect` takes the OAuth client from `--client-file`, then `GOOGLE_CLIENT_ID` /
+`GOOGLE_CLIENT_SECRET` or `GOOGLE_CLIENT_FILE` (extension settings), then the
+stored client, then email-cli's, then the newest `~/Downloads/client_secret_*.json`,
+and stores it as `~/.config/gdrive-cli/client_secret.json` (chmod 600), where
+email-cli finds it too. One Google Cloud project and one Desktop app client
+serve both CLIs.
+
 Credentials live in `~/.config/gdrive-cli/accounts/<name>/token.json`. The
 first run copies any existing `~/.config/gdrive/` accounts into that directory.
 
@@ -87,8 +105,8 @@ either: a work account sees work files, while a personal account is a separate
 project that cannot touch them. Pick the account that owns the files, not the
 default.
 
-The OAuth app is in "Testing" status, so Google expires its refresh token
-roughly weekly. `auth status` reporting `token expired (will auto-refresh)` is
+An OAuth app left in "Testing" status gets refresh tokens Google expires after
+7 days; `google-setup` has the user publish it to "In production" to avoid that. `auth status` reporting `token expired (will auto-refresh)` is
 fine; `token invalid` or not authenticated means re-login in a real terminal:
 
 ```bash
@@ -261,9 +279,9 @@ gdrive --account foo pipeline folder-summary --folder-id FOLDER_ID
 - **Patching `gdrive_cli.py`.** Do not apply multi-hunk string replaces to the
   file (truncation risk). Restore it from git and patch one anchored replace at a
   time, asserting each anchor occurs exactly once.
-- **Only `gdrive auth login` opens a browser.** A lapsed token on any other
-  command fails with the `auth login --account <name>` command to run in a real
-  terminal. `--modified-after` accepts a date, a `YYYY-MM-DD HH:MM:SS`, or a
+- **Only `gdrive auth login` and `gdrive connect` open a browser.** A lapsed
+  token on any other command fails naming `connect` (Claude) and the terminal
+  command. `--modified-after` accepts a date, a `YYYY-MM-DD HH:MM:SS`, or a
   full `…Z` ISO timestamp.
 - **Sheets row heights.** A `\n` inside a written value only shows up if the cell wraps, so pair
   multi-line writes with `--wrap`. **`--autofit-rows` does not grow rows** —
