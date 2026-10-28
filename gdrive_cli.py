@@ -28,8 +28,12 @@ import subprocess
 import sys
 import tempfile
 import time
+import warnings
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+# google-api-core warns about the Python end of life on every run, burying real errors on stderr.
+warnings.filterwarnings("ignore", message="You are using a Python version", category=FutureWarning)
 
 # Entry points may be symlinked into a shared bin directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
