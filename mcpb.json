@@ -2,7 +2,10 @@
   "display_name": "Google Drive",
   "description": "Search Google Drive, read Docs, PDFs and Sheets, and fill spreadsheets from Claude, with your own Google account.",
   "long_description": "Searches your Google Drive (including shared drives), reads Google Docs, PDFs and spreadsheets, and can write to Google Sheets when you ask it to. Several Google accounts can be connected side by side.\n\nIt signs in through your own Google Cloud project, so your files are only shared between Google and this Mac. Claude sets it up with you, once, in about ten minutes:\n1. Open Claude in Chrome (the Claude extension for Google Chrome), in the Chrome profile where you are signed in to your Google account.\n2. Ask Claude: \"set up Google Drive\". Claude reads the current steps from this extension and goes through Google Cloud Console with you, click by click: a project, the Drive and Sheets APIs, the sign-in screen, and a \"Desktop app\" client whose file lands in your Downloads folder. If you already set up the Email extension, Claude reuses that same project.\n3. Claude then opens Google's sign-in page: pick your account, click Advanced → Go to ... (unsafe) when Google says it has not verified the app (it is your own app), tick every box and click Continue. If macOS asks whether Claude may read your Downloads folder, click Allow.\n\nThe settings below are optional: the client is found in Downloads on its own. To disconnect, ask Claude to disconnect Google Drive, or remove the app at https://myaccount.google.com/connections .",
-  "platforms": ["darwin", "linux"],
+  "platforms": [
+    "darwin",
+    "linux"
+  ],
   "env": {
     "GOOGLE_CLIENT_ID": "${user_config.client_id}",
     "GOOGLE_CLIENT_SECRET": "${user_config.client_secret}",
@@ -28,5 +31,12 @@
       "sensitive": true,
       "required": false
     }
+  },
+  "site": {
+    "group": "productivity",
+    "rank": 20,
+    "needs": [
+      "A free Google Cloud project of your own (the same one as Email works). Ask Claude in Chrome to guide you, click by click"
+    ]
   }
 }
