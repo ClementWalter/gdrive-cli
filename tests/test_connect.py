@@ -104,7 +104,7 @@ def test_newest_download_wins(tmp_path, client_doc):
 
 @pytest.mark.parametrize("granted", ["https://www.googleapis.com/auth/drive", ["https://www.googleapis.com/auth/drive"]])
 def test_missing_scopes_reads_space_separated_or_list(granted):
-    assert setup.missing_scopes(granted, cli.SCOPES) == ["https://www.googleapis.com/auth/spreadsheets"]
+    assert setup.missing_scopes(granted, cli.SCOPES) == cli.SCOPES[1:]
 
 
 # -- guide -------------------------------------------------------------------

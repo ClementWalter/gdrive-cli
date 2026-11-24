@@ -3,10 +3,11 @@ name: gdrive-cli
 description: >
   Google Drive gateway. Use when the user wants to read Google Docs, find/search
   files in Google Drive, read spreadsheets, read PDFs, extract data, or
-  fill/compute Google Sheets formulas. Triggers: "read google doc", "find
-  spreadsheet", "search drive", "fill sheet from PDF", "compute sheet", "extract
-  PDF to sheets", "gdrive", "read sheet", "update sheet", "google docs", "google
-  drive".
+  fill/compute Google Sheets formulas, or read Google Chat spaces and the chat of
+  a Google Meet call. Triggers: "read google doc", "find spreadsheet", "search
+  drive", "fill sheet from PDF", "compute sheet", "extract PDF to sheets",
+  "gdrive", "read sheet", "update sheet", "google docs", "google drive", "meet
+  chat", "what was said in the meeting chat", "google chat".
 allowed-tools:
   - Bash
   - Read
@@ -17,8 +18,9 @@ allowed-tools:
 
 # Google Drive Gateway
 
-Read Google Docs, search Drive, extract PDFs, and read/write Google Sheets.
-Supports multiple Google accounts.
+Read Google Docs, search Drive, extract PDFs, read/write Google Sheets, and
+read Google Chat (including Google Meet chats). Supports multiple Google
+accounts.
 
 **This CLI is the only Drive access path.** Do not use a Google Drive MCP
 connector, a copied `drive_search.py`, or a bare `python3` that imports `google`
@@ -117,12 +119,17 @@ gdrive auth login --account work --login-hint <email>
 
 - `https://www.googleapis.com/auth/drive`
 - `https://www.googleapis.com/auth/spreadsheets`
+- `https://www.googleapis.com/auth/chat.spaces.readonly`
+- `https://www.googleapis.com/auth/chat.messages.readonly`
+
+A token connected before the Chat scopes existed keeps working for Drive and
+Sheets; `chat` commands then fail naming `gdrive --account <name> connect`.
 
 ### Setting Up Google Cloud Credentials
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create or select a project
-3. Enable **Google Drive API** and **Google Sheets API**
+3. Enable **Google Drive API**, **Google Sheets API** and **Google Chat API**
 4. Create **OAuth 2.0 Client ID** (Desktop application)
 5. Download the JSON and save it under the per-user config dir — **never inside
    the skill directory, which is a git repo**:
@@ -240,6 +247,24 @@ gdrive pipeline pdf-to-table --file-id <PDF_FILE_ID>
 gdrive pipeline folder-summary --folder-id <FOLDER_ID>
 ```
 
+### Chat Operations (read-only)
+
+Google Meet keeps the in-call chat of a calendar meeting in a Chat space named
+`<meeting title> - <date>` (e.g. `Team Weekly - Nov 18`, `Sprint Demo - 20 Nov`).
+The Gemini recap is posted there too, with the notes and recording as Drive
+attachments (`driveFileId`, readable with `docs read --doc-id`).
+
+```bash
+# Spaces, most recently active first; --meet keeps Meet chats only
+gdrive --account foo chat spaces --meet --limit 20
+gdrive --account foo chat spaces --query weekly --since 2026-11-01 --json
+
+# Messages, oldest first. SPACE: spaces/ID, a chat.google.com URL, or part of the name
+gdrive --account foo chat read 'Planning Review - Nov 24'
+gdrive --account foo chat read 'Weekly Sync' --latest --json
+gdrive --account foo chat read spaces/AAAAbCdEfGh --since 2026-11-24T10:00:00Z --limit 50
+```
+
 ## Recipes
 
 ```bash
@@ -257,6 +282,9 @@ gdrive --account foo sheets read --spreadsheet-id ID --range 'Sheet1!A1:H50' --f
 
 # "Put the PDFs of this folder into a table"
 gdrive --account foo pipeline folder-summary --folder-id FOLDER_ID
+
+# "What was said in the chat of today's <meeting>?"
+gdrive --account foo chat read '<meeting title>' --latest
 ```
 
 ## Gotchas
@@ -290,6 +318,11 @@ gdrive --account foo pipeline folder-summary --folder-id FOLDER_ID
   Heights persist, so reset a block to its baseline before growing individual
   rows, or a row that loses content stays tall. `format` prints the resulting
   pixel heights, so the outcome is verified rather than assumed.
+
+- **Meet chat detection is by name.** The Chat API has no meeting marker, so
+  `--meet` matches the ` - <date>` suffix Meet gives the space. A recurring
+  meeting has one space per occurrence: pick one with the date in the name,
+  `--latest`, or the space ID.
 
 ## Key Details
 

@@ -2,9 +2,10 @@
 
 **Visibility: public.**
 
-Terminal access to Google Drive, Docs, and Sheets using a desktop OAuth token.
-Search (including raw Drive v3 `q=`, `fullText`, `modifiedTime`, shared drives),
-read docs, download files, rename, extract PDFs, and read/write Sheets.
+Terminal access to Google Drive, Docs, Sheets and Chat using a desktop OAuth
+token. Search (including raw Drive v3 `q=`, `fullText`, `modifiedTime`, shared
+drives), read docs, download files, rename, extract PDFs, read/write Sheets, and
+read Google Chat spaces, including the chats of Google Meet calls.
 
 The tool is exposed both as a standalone CLI and as a
 [Claude Code](https://claude.com/claude-code) skill (see
@@ -116,6 +117,10 @@ gdrive --account foo docs read --url "https://docs.google.com/document/d/ID/edit
 gdrive --account foo drive get ID --json --permissions
 gdrive --account foo drive comments ID --json
 gdrive --account foo drive rename ID "New title" --json
+
+# Google Chat (read-only): Meet chats are spaces named "<meeting title> - <date>"
+gdrive --account foo chat spaces --meet --limit 20
+gdrive --account foo chat read 'Weekly Sync' --latest --json
 ```
 
 ## Credential synchronization

@@ -26,6 +26,8 @@ CONSENT_SECONDS = 300
 SCOPE_LABELS = {
     "https://www.googleapis.com/auth/drive": "See, edit, create, and delete all of your Google Drive files",
     "https://www.googleapis.com/auth/spreadsheets": "See, edit, create, and delete all your Google Sheets spreadsheets",
+    "https://www.googleapis.com/auth/chat.spaces.readonly": "View chat and spaces in Google Chat",
+    "https://www.googleapis.com/auth/chat.messages.readonly": "See messages as well as their reactions and message content in Google Chat",
 }
 
 
@@ -111,6 +113,8 @@ def guide(client_label: str | None, project_id: str | None, accounts: list[str],
         "2. Enable the APIs, one page each, clicking **Enable** (a page showing **Manage** is already enabled):",
         "   - https://console.cloud.google.com/apis/library/drive.googleapis.com?project=PROJECT_ID (Google Drive API)",
         "   - https://console.cloud.google.com/apis/library/sheets.googleapis.com?project=PROJECT_ID (Google Sheets API)",
+        "   - https://console.cloud.google.com/apis/library/chat.googleapis.com?project=PROJECT_ID (Google Chat API: "
+        "reads Chat spaces and Google Meet chats; nothing to configure on its Configuration tab)",
         "   - https://console.cloud.google.com/apis/library/gmail.googleapis.com?project=PROJECT_ID (Gmail API: only the "
         "Email extension uses it; enabling it now lets that extension reuse this project without coming back here)",
         "   Google Docs are read through the Drive API; the Docs API is not needed.",

@@ -54,10 +54,15 @@ from rich.table import Table
 logger = logging.getLogger(__name__)
 console = Console()
 
-# Scopes: full Drive access (covers Docs export) + full Sheets access
+# Full Drive access (covers Docs export), full Sheets access, read-only Google Chat.
+CHAT_SCOPES = [
+    "https://www.googleapis.com/auth/chat.spaces.readonly",
+    "https://www.googleapis.com/auth/chat.messages.readonly",
+]
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/spreadsheets",
+    *CHAT_SCOPES,
 ]
 
 # Set in cli() — when True, never open a browser for OAuth.
@@ -355,8 +360,9 @@ def _get_credentials(
         auth_store.restore(token_file, "gdrive", account)
 
     # `gdrive auth login` always re-consents. Other commands reuse a valid token.
+    # The token's own granted scopes: refreshing with more than were granted fails with invalid_scope.
     if not force and token_file.exists():
-        creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
+        creds = Credentials.from_authorized_user_file(str(token_file))
 
     if creds and creds.expired and creds.refresh_token:
         # Token expired but we have a refresh token — try silent refresh
@@ -411,8 +417,8 @@ def _drive_service(account: str):
     return build("drive", "v3", credentials=_get_credentials(account))
 
 
-def _friendly_http_error(exc: HttpError, account: str | None = None) -> str:
-    """Turn a Drive/Sheets HttpError into a one-screen CLI message."""
+def _friendly_http_error(exc: HttpError, account: str | None = None, api: str = "Google Drive API") -> str:
+    """Turn a Google API HttpError into a one-screen CLI message."""
     message = getattr(exc, "reason", None) or str(exc)
     try:
         payload = json.loads(exc.content.decode("utf-8")) if exc.content else {}
@@ -432,12 +438,12 @@ def _friendly_http_error(exc: HttpError, account: str | None = None) -> str:
                 + "\n".join(f"    gdrive --account {a} whoami" for a in others)
             )
         return (
-            f"Google Drive API is not enabled for the OAuth project behind "
+            f"{api} is not enabled for the OAuth project behind "
             f"account '{account}'.\n"
             f"  {message}\n"
             f"{extra}"
         )
-    return f"Drive API error: {message}"
+    return f"{api} error: {message}"
 
 
 def _whoami(account: str) -> dict:
@@ -465,6 +471,110 @@ def _whoami(account: str) -> dict:
 def _sheets_service(account: str):
     """Build an authenticated Google Sheets API v4 client."""
     return build("sheets", "v4", credentials=_get_credentials(account))
+
+
+# ---------------------------------------------------------------------------
+# Google Chat helpers
+# ---------------------------------------------------------------------------
+
+# Meet keeps an event's in-call chat in a Chat space named "<event title> - <date>"; the API has no other marker.
+MEET_SPACE_NAME = re.compile(r" - (?:[A-Z][a-z]{2,4}\.? \d{1,2}|\d{1,2} [A-Za-z]{3,5}\.?)$")
+# chat.google.com/room/ID, chat.google.com/u/0/app/chat/ID, mail.google.com/chat/u/0/#chat/space/ID; IDs are 11 chars.
+CHAT_SPACE_URL = re.compile(r"(?:chat|mail)\.google\.com/\S*?(?:room|space|chat)/([A-Za-z0-9_-]{9,})")
+
+
+def _chat_service(account: str):
+    """Build an authenticated Google Chat API v1 client; old tokens lack the Chat scopes."""
+    creds = _get_credentials(account)
+    granted = set(getattr(creds, "scopes", None) or [])
+    if isinstance(creds, Credentials) and not set(CHAT_SCOPES) <= granted:
+        raise click.ClickException(
+            f"Account '{account}' was connected before Google Chat access existed.\n"
+            f"  Connect it again and tick the Google Chat boxes: gdrive --account {account} connect"
+        )
+    return build("chat", "v1", credentials=creds)
+
+
+def _is_meet_space(space: dict) -> bool:
+    return space.get("spaceType") == "SPACE" and bool(MEET_SPACE_NAME.search(space.get("displayName") or ""))
+
+
+def _space_id(ref: str) -> str | None:
+    """`spaces/ID`, a chat.google.com URL, or None when ref is a name to look up."""
+    if ref.startswith("spaces/"):
+        return ref
+    match = CHAT_SPACE_URL.search(ref)
+    return f"spaces/{match.group(1)}" if match else None
+
+
+def _list_spaces(service) -> list[dict]:
+    """Every space the user is a member of, most recently active first."""
+    spaces, token = [], None
+    while True:
+        page = service.spaces().list(pageSize=1000, pageToken=token).execute()
+        spaces += page.get("spaces", [])
+        token = page.get("nextPageToken")
+        if not token:
+            break
+    return sorted(spaces, key=lambda s: s.get("lastActiveTime") or "", reverse=True)
+
+
+def _resolve_space(service, ref: str, latest: bool) -> dict:
+    """A space from its ID, URL, or a case-insensitive part of its name."""
+    space_id = _space_id(ref)
+    if space_id:
+        return service.spaces().get(name=space_id).execute()
+    needle = ref.casefold()
+    found = [s for s in _list_spaces(service) if needle in (s.get("displayName") or "").casefold()]
+    exact = [s for s in found if (s.get("displayName") or "").casefold() == needle]
+    found = exact or found
+    if not found:
+        raise click.ClickException(f"No Chat space name contains '{ref}'. List them with: gdrive chat spaces --query TEXT")
+    if len(found) > 1 and not latest:
+        names = "\n".join(f"  {s['name']}  {s.get('displayName')}" for s in found[:10])
+        more = f"\n  ... {len(found) - 10} more" if len(found) > 10 else ""
+        raise click.ClickException(
+            f"{len(found)} spaces match '{ref}'; pass a space ID, a longer name, or --latest:\n{names}{more}"
+        )
+    return found[0]
+
+
+def _list_messages(service, space: str, since: str | None, limit: int) -> list[dict]:
+    """Messages oldest first; with a limit, the newest `limit` of them."""
+    kwargs = {"parent": space, "pageSize": 1000}
+    if since:
+        kwargs["filter"] = f'createTime > "{_normalize_modified_after(since)}"'
+    if limit:
+        # Newest first so a limit keeps the end of the conversation.
+        kwargs["orderBy"] = "createTime desc"
+    messages, token = [], None
+    while True:
+        page = service.spaces().messages().list(pageToken=token, **kwargs).execute()
+        messages += page.get("messages", [])
+        token = page.get("nextPageToken")
+        if not token or (limit and len(messages) >= limit):
+            break
+    if limit:
+        messages = list(reversed(messages[:limit]))
+    return messages
+
+
+def _message_row(message: dict) -> dict:
+    """The fields a reader needs from a Chat message."""
+    sender = message.get("sender") or {}
+    return {
+        "name": message.get("name"),
+        "createTime": message.get("createTime"),
+        "sender": sender.get("displayName") or sender.get("name"),
+        "email": sender.get("email"),
+        "text": message.get("text") or "",
+        # Meet recaps attach Drive files (Gemini notes, recordings) with an ID and no name.
+        "attachments": [
+            {"name": a.get("contentName"), "driveFileId": (a.get("driveDataRef") or {}).get("driveFileId")}
+            for a in message.get("attachment") or []
+        ],
+        "thread": (message.get("thread") or {}).get("name"),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -804,7 +914,7 @@ def auth_status(ctx, as_json: bool, account_name: str | None) -> None:
 
     if token_file.exists():
         try:
-            creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
+            creds = Credentials.from_authorized_user_file(str(token_file))
             if creds.valid:
                 console.print(f"[green]OAuth2 ({account}): authenticated (token valid)[/green]")
                 return
@@ -1867,6 +1977,111 @@ def sheets_format(
             f" across {len(heights)} row(s)"
         )
     console.print(summary)
+
+
+# -- Chat subgroup ----------------------------------------------------------
+
+
+@cli.group(epilog="\b\nExamples:\n  gdrive chat spaces --meet\n  gdrive chat read 'Team Weekly' --latest")
+def chat() -> None:
+    """Google Chat spaces and messages (read-only), including Google Meet chats."""
+
+
+@chat.command("spaces", epilog="\b\nExamples:\n  gdrive chat spaces --meet --limit 20\n  gdrive chat spaces --query 'weekly' --since 2026-11-01 --json")
+@click.option("--meet", is_flag=True, help="Only the chats Google Meet keeps for calendar meetings.")
+@click.option("--query", default=None, help="Keep spaces whose name contains this text (case-insensitive).")
+@click.option("--since", default=None, help="Keep spaces active after this date (YYYY-MM-DD or RFC 3339).")
+@click.option("--limit", type=click.IntRange(0), default=50, show_default=True, help="Most recently active first; 0 for all.")
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON")
+@click.pass_context
+def chat_spaces(ctx, meet: bool, query: str | None, since: str | None, limit: int, as_json: bool) -> None:
+    """List the Chat spaces you belong to, most recently active first.
+
+    A Google Meet chat is a space named "<meeting title> - <date>".
+    """
+    account = ctx.obj["account"]
+    service = _chat_service(account)
+    try:
+        spaces = _list_spaces(service)
+    except HttpError as exc:
+        raise click.ClickException(_friendly_http_error(exc, account, "Google Chat API")) from exc
+    if meet:
+        spaces = [s for s in spaces if _is_meet_space(s)]
+    if query:
+        spaces = [s for s in spaces if query.casefold() in (s.get("displayName") or "").casefold()]
+    if since:
+        cutoff = _normalize_modified_after(since)
+        spaces = [s for s in spaces if (s.get("lastActiveTime") or "") > cutoff]
+    if limit:
+        spaces = spaces[:limit]
+    rows = [
+        {
+            "name": s.get("name"),
+            "displayName": s.get("displayName"),
+            "spaceType": s.get("spaceType"),
+            "meet": _is_meet_space(s),
+            "lastActiveTime": s.get("lastActiveTime"),
+            "members": (s.get("membershipCount") or {}).get("joinedDirectHumanUserCount"),
+            "url": s.get("spaceUri"),
+        }
+        for s in spaces
+    ]
+    if as_json:
+        click.echo(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        console.print("[yellow]No matching spaces.[/yellow]")
+        return
+    table = Table()
+    table.add_column("Space", style="dim")
+    table.add_column("Name", style="cyan")
+    table.add_column("Last active")
+    table.add_column("Members", justify="right")
+    for r in rows:
+        table.add_row(r["name"], r["displayName"] or f"({r['spaceType']})", (r["lastActiveTime"] or "")[:16], str(r["members"] or ""))
+    console.print(table)
+
+
+@chat.command("read", epilog="\b\nExamples:\n  gdrive chat read spaces/AAAAbCdEfGh\n  gdrive chat read 'https://chat.google.com/room/AAAAbCdEfGh'\n  gdrive chat read 'Weekly Sync' --latest --json\n  gdrive chat read 'Planning Review - Nov 24' --since 2026-11-24T10:00:00Z --limit 20")
+@click.argument("space")
+@click.option("--latest", is_flag=True, help="When several space names match, read the most recently active one.")
+@click.option("--since", default=None, help="Only messages after this date (YYYY-MM-DD or RFC 3339).")
+@click.option("--limit", type=click.IntRange(0), default=0, show_default=True, help="Keep the newest N messages; 0 for all.")
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON")
+@click.pass_context
+def chat_read(ctx, space: str, latest: bool, since: str | None, limit: int, as_json: bool) -> None:
+    """Read the messages of a Chat space, oldest first.
+
+    SPACE is a space ID (spaces/...), a chat.google.com URL, or part of the
+    space name, e.g. a meeting title. Names matching several spaces need
+    --latest or a longer name.
+    """
+    account = ctx.obj["account"]
+    service = _chat_service(account)
+    try:
+        found = _resolve_space(service, space, latest)
+        messages = [_message_row(m) for m in _list_messages(service, found["name"], since, limit)]
+    except HttpError as exc:
+        raise click.ClickException(_friendly_http_error(exc, account, "Google Chat API")) from exc
+    if as_json:
+        click.echo(json.dumps({"space": found.get("name"), "displayName": found.get("displayName"),
+                               "url": found.get("spaceUri"), "n": len(messages), "messages": messages}, indent=2))
+        return
+    console.print(f"[bold]{found.get('displayName') or found.get('name')}[/bold]  [dim]{found.get('name')}[/dim]")
+    if not messages:
+        console.print("[yellow]No messages.[/yellow]")
+        return
+    day = None
+    for m in messages:
+        stamp = m["createTime"] or ""
+        if stamp[:10] != day:
+            day = stamp[:10]
+            console.rule(day)
+        files = "".join(
+            f"  [dim]\\[{a['name'] or 'file'}{' drive:' + a['driveFileId'] if a['driveFileId'] else ''}][/dim]"
+            for a in m["attachments"]
+        )
+        console.print(f"[dim]{stamp[11:16]}[/dim] [cyan]{m['sender']}[/cyan]: {m['text']}{files}", markup=True, highlight=False)
 
 
 # -- Pipeline subgroup ------------------------------------------------------
